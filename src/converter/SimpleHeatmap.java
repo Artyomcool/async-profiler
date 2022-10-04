@@ -111,7 +111,7 @@ public class SimpleHeatmap extends ResourceProcessor {
                 System.out.print("Processing samples: " + procent + "%     \r");
             }
             pp++;
-            if (pp > 4) {
+            if (pp > 1) {
                 //break;
             }
 
@@ -527,6 +527,7 @@ public class SimpleHeatmap extends ResourceProcessor {
             out.writeVar(node.id);
         }
 
+        Collection<LzNode> chunks = new LinkedHashSet<>();
         int chunksCount = 0;
         was = out.pos();
         for (SampleBlock block : context.blocks) {
@@ -540,6 +541,8 @@ public class SimpleHeatmap extends ResourceProcessor {
                     out.writeVar(data);
                     histogram.add(out.pos() - t, "tail size");
                     chunksCount++;
+
+                    chunks.add(lzNode);
                 }
             }
         }
@@ -547,10 +550,6 @@ public class SimpleHeatmap extends ResourceProcessor {
 
         System.out.println("bodies2 " + (out.pos() - was) / 1024.0 / 1024.0 + " MB");
 
-        Collection<LzNode> chunks = new LinkedHashSet<>();
-        for (List<LzNode> bestSample : blocksData) {
-            chunks.addAll(bestSample);
-        }
         System.out.println("chunks count " + chunks.size());
 
         for (LzNode node : allNodes) {
@@ -564,19 +563,23 @@ public class SimpleHeatmap extends ResourceProcessor {
         Collections.sort((List)chunks, new Comparator<LzNode>() {
             @Override
             public int compare(LzNode o1, LzNode o2) {
-                return Integer.compare(o2.count, o1.count);
+                return Long.compare((long)o2.count << 32 | o2.id, (long)o1.count << 32 | o1.id);
             }
         });
         int storageSize = 0;
         for (LzNode node : chunks) {
-            storageSize += node.count;
-            while (node != null && node.count != 0) {
-                node.count = 0;
-                node = node.parent;
+            //System.out.println(node.id - synonyms.size() + " " + Math.abs(node.count) + " " + storageSize);
+            if (node.count > 0) {
+                storageSize += node.count;
+                while (node.count > 0) {
+                    node.count = -node.count;
+                    node = node.parent;
+                }
             }
         }
         System.out.println("storageSize " + storageSize * 4 / 1024.0 / 1024.0 + " MB (" + storageSize + ")");
 
+        out.write36(chunks.size());
         out.write36(synonymsCount);
         out.write36(context.blocks.size());
         out.write36(startsOut.length);

@@ -65,7 +65,7 @@ public class jfr2heat {
             }
         }
 
-        SimpleHeatmap fg = new SimpleHeatmap("Heatmap, CPU", alloc);
+        SimpleHeatmap fg = new SimpleHeatmap("Heatmap, " + (alloc ? "Alloc" : "CPU"), alloc);
         try (JfrReader jfr = new JfrReader(input)) {
             new jfr2heat(jfr).convert(fg);
         }

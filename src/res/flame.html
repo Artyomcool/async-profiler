@@ -293,7 +293,7 @@
         return a >= b ? '100' : (100 * a / b).toFixed(2);
     }
 
-    function findFrame(frames, x) {
+    function findFrameIndex(frames, x) {
         let left = 0;
         let right = frames.length - 1;
 
@@ -306,14 +306,38 @@
             } else if (f.left + f.width <= x) {
                 left = mid + 1;
             } else {
-                return f;
+                return mid;
             }
         }
 
-        if (frames[left] && (frames[left].left - x) * px < 0.5) return frames[left];
-        if (frames[right] && (x - (frames[right].left + frames[right].width)) * px < 0.5) return frames[right];
+        if (frames[left] && (frames[left].left - x) * px < 0.5) return left;
+        if (frames[right] && (x - (frames[right].left + frames[right].width)) * px < 0.5) return right;
 
-        return null;
+        return -1;
+    }
+
+    function findFrame(frames, x) {
+        const index = findFrameIndex(frames, x);
+        if (index === -1) {
+            return null;
+        }
+        return frames[index];
+    }
+
+    function findNextFrame(frames, x) {
+        const index = findFrameIndex(frames, x) + 1;
+        if (index === 0 || index >= frames.length) {
+            return null;
+        }
+        return frames[index];
+    }
+
+    function findPrevFame(frames, x) {
+        const index = findFrameIndex(frames, x) - 1;
+        if (index < 0) {
+            return null;
+        }
+        return frames[index];
     }
 
     const marked = [];
@@ -402,8 +426,14 @@
                 let details = f.details || '';
                 canvas.title = f.title + '\n(' + samples(f.width) + details + ', ' + pct(f.width, levels[0][0].width) + '%)';
                 canvas.style.cursor = 'pointer';
-                canvas.onclick = function () {
-                    if (f !== root) {
+                canvas.onclick = function (e) {
+                    if (e.ctrlKey) {
+                        const n = e.shiftKey ? findPrevFame(levels[h], event.offsetX / px + root.left) : findNextFrame(levels[h], event.offsetX / px + root.left);
+                        if (n) {
+                            render(n, h);
+                        }
+                        canvas.onmousemove();
+                    } else if (f !== root) {
                         render(f, h);
                         canvas.onmousemove();
                     }
@@ -542,6 +572,7 @@
         const startMethodsCount = data.int36(-5);
         const blocksCount = data.int36(-6);
         const synonymsCount = data.int36(-7);
+        const uniqueChunksCount = data.int36(-8);
 
         const starts = new Set();
         for (let i = 0; i < startMethodsCount; i++) {
@@ -551,13 +582,13 @@
         let littleEndian = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 
         // NOTE: All dynamic allocations should be done before this line
-        const buffer = new ArrayBuffer(8 * chunksCount + (4 + 4 + 4 + 2) * lz78RecordsCount);
-        const chunksOrderPacked = new BigUint64Array(buffer, 0, chunksCount);    // FIXME NOTE!!! parents in most cases takes only 3 bytes!
-        const chunksOrderView = new DataView(buffer, 0, chunksCount * 8);
-        const lz78RootMethods = new Uint32Array(buffer, chunksCount * 8, lz78RecordsCount);   // FIXME NOTE!!! methods in most cases takes only 2 bytes!
-        const lz78CurrentMethods = new Uint32Array(buffer, chunksCount * 8 + lz78RecordsCount * 4, lz78RecordsCount); // FIXME NOTE!!! methods in most cases takes only 2 bytes!
-        const lz78Parents = new Uint32Array(buffer, chunksCount * 8 + lz78RecordsCount * 8, lz78RecordsCount);    // FIXME NOTE!!! parents in most cases takes only 3 by
-        const lz78Sizes = new Uint16Array(buffer, chunksCount * 8 + lz78RecordsCount * 12, lz78RecordsCount);
+        const buffer = new ArrayBuffer(8 * uniqueChunksCount + (4 + 4 + 4 + 2) * lz78RecordsCount);
+        const chunksOrderPacked = new BigUint64Array(buffer, 0, uniqueChunksCount);    // FIXME NOTE!!! parents in most cases takes only 3 bytes!
+        const chunksOrderView = new DataView(buffer, 0, uniqueChunksCount * 8);
+        const lz78RootMethods = new Uint32Array(buffer, uniqueChunksCount * 8, lz78RecordsCount);   // FIXME NOTE!!! methods in most cases takes only 2 bytes!
+        const lz78CurrentMethods = new Uint32Array(buffer, uniqueChunksCount * 8 + lz78RecordsCount * 4, lz78RecordsCount); // FIXME NOTE!!! methods in most cases takes only 2 bytes!
+        const lz78Parents = new Uint32Array(buffer, uniqueChunksCount * 8 + lz78RecordsCount * 8, lz78RecordsCount);    // FIXME NOTE!!! parents in most cases takes only 3 by
+        const lz78Sizes = new Uint16Array(buffer, uniqueChunksCount * 8 + lz78RecordsCount * 12, lz78RecordsCount);
 
         const returnBuffer = new ArrayBuffer(4 * samplesCount + 4 * chunksCount + 8 * storageSize + 4 * blocksCount);
         const sampleToChunkEnds = new Uint32Array(returnBuffer, 0, samplesCount);  // FIXME NOTE!!! parents in most cases takes only 3 bytes!
@@ -629,10 +660,22 @@
         }
 
         let sample = 0;
+        let uniqueChunkIndex = 0;
         for (let chunk = 0; chunk < chunksCount; chunk++) {
             const chunkId = data.nextVarInt();
             const recordId = (chunkId < synonymsCount ? synonyms[chunkId] : chunkId) - synonymsCount;
             chunksToStorage[chunk] = recordId;
+            if (lz78Sizes[recordId] !== 0) {
+                if (littleEndian) {
+                    chunksOrderView.setUint32(uniqueChunkIndex << 3, recordId, true);
+                    chunksOrderView.setUint32(uniqueChunkIndex << 3 | 4, lz78Sizes[recordId], true);
+                } else {
+                    chunksOrderView.setUint32(uniqueChunkIndex << 3 | 4, recordId, false);
+                    chunksOrderView.setUint32(uniqueChunkIndex << 3, lz78Sizes[recordId], false);
+                }
+                lz78Sizes[recordId] = 0;
+                uniqueChunkIndex++;
+            }
             const rootMethod = lz78RootMethods[recordId];
             if (starts.has(rootMethod)) {
                 if (sample !== 0) {
@@ -641,60 +684,61 @@
                 sample++;
             }
         }
+        console.log("uniqueChunkIndex", uniqueChunkIndex);
         sampleToChunkEnds[sample - 1] = chunksCount;
 
         console.log("tails", performance.now() - perf);
         perf = performance.now();
 
-        if (littleEndian) {
-            for (let i = 0; i < chunksCount; i++) {
-                chunksOrderView.setUint32(i << 3, i, true);
-                chunksOrderView.setUint32(i << 3 | 4, lz78Sizes[chunksToStorage[i]], true);
-            }
-        } else {
-            for (let i = 0; i < chunksCount; i++) {
-                chunksOrderView.setUint32(i << 3 | 4, i, false);
-                chunksOrderView.setUint32(i << 3, lz78Sizes[chunksToStorage[i]], false);
-            }
-        }
-        console.log("chunksReorder1", performance.now() - perf);
-        perf = performance.now();
-
         chunksOrderPacked.sort();
 
-        console.log("chunksReorder2", performance.now() - perf);
+        console.log("chunksReorder", performance.now() - perf);
         perf = performance.now();
 
         const refs = lz78RootMethods;    // no need for them anymore
         refs.fill(0);
 
+        console.log(chunksCount);
         let pos = 0;
-        for (let ci = chunksCount - 1; ci >= 0; ci--) {
-            const chunkIndex = littleEndian
+        for (let ci = uniqueChunkIndex - 1; ci >= 0; ci--) {
+            let recordId = littleEndian
                 ? chunksOrderView.getUint32(ci << 3, true)
                 : chunksOrderView.getUint32(ci << 3 | 4, false);
-            let recordId = chunksToStorage[chunkIndex];
+
             if (refs[recordId] !== 0) {
-                chunksToStorage[chunkIndex] = refs[recordId];
                 continue;
             }
 
-            let size = lz78Sizes[recordId];
-            chunksToStorage[chunkIndex] = pos; // reuse space
+            let size = littleEndian
+                ? chunksOrderView.getUint32(ci << 3 | 4, true)
+                : chunksOrderView.getUint32(ci << 3, false);
+
+            //console.log(recordId, size, pos);
             do {
                 refs[recordId] = pos;
+                if (pos === storage.length) {
+                    throw "hh";
+                }
                 storageSizes[pos] = size--;
                 storage[pos++] = lz78CurrentMethods[recordId];
                 recordId = lz78Parents[recordId];
             } while (recordId !== 0 && refs[recordId] === 0);
 
             while (recordId !== 0) {
+                if (pos === storage.length) {
+                    throw "hh2";
+                }
                 storageSizes[pos] = size--;
                 storage[pos++] = lz78CurrentMethods[recordId];
                 recordId = lz78Parents[recordId];
             }
         }
         console.log("storage size", pos);
+
+        for (let chunkIndex = 0; chunkIndex < chunksCount; chunkIndex++) {
+            let recordId = chunksToStorage[chunkIndex];
+            chunksToStorage[chunkIndex] = refs[recordId];
+        }
 
         console.log("storage", performance.now() - perf);
         perf = performance.now();
@@ -893,7 +937,7 @@
             return out.methodName + locationSuffix;
         }
 
-        return out.className + "." + out.methodName + locationSuffix;
+        return out.className + "." + out.methodName + locationSuffix + "#" + methodIndex;
     }
 
     let bgInterval = null;
@@ -1020,52 +1064,80 @@
         const countAtLastBlock = counts[to] || counts[counts.length - 1];
         const count = countAtLastBlock - countBeforeFirstBlock;
 
-        const framesBuffer = new Uint32Array(100050000);   // fixme prealloc it!
+        const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
+        const firstChunkPosOfLongSamplesBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
         const sampleToChunkPos = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
         const sampleToStorageDelta = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
-        const theOnlyChunksSamples = new Uint32Array(storageSizes.length * 2 + 1);   // fixme prealloc it!
+        const firstChunkPosOfLongSamples = new Uint32Array(storageSizes.length);   // fixme prealloc it!
+        const theOnlyChunks = new Uint32Array(storageSizes.length);   // fixme prealloc it!
 
-        let p = 0;
-        framesBuffer[p++] = 1;
+        let theOnlyChunksBufferPos = 0;
 
-        framesBuffer[p++] = 0;
-        framesBuffer[p++] = 0;
-        framesBuffer[p++] = count;  // samples count
+        let firstChunkPosOfLongSamplesPos = 0;
+        let totalCountLongSamples = 0;
+        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            const storagePos = chunksToStorage[chunkPos];
+            if (chunkPos + 1 === chunkEndPos) {
+                if (theOnlyChunks[storagePos]++ === 0) {
+                    theOnlyChunksBuffer[theOnlyChunksBufferPos++] = storagePos;
+                }
+            } else {
+                if (firstChunkPosOfLongSamples[storagePos]++ === 0) {
+                    //console.log("longSample", title(currentHeatmap.blocksData.storage[storagePos + storageSizes[storagePos] - 1], {}));
+                    firstChunkPosOfLongSamplesBuffer[firstChunkPosOfLongSamplesPos++] = storagePos;
+                }
+                totalCountLongSamples++;
+            }
+        }
+
+        // fixme prealloc it with max possible size!
+        const framesBuffer = new Uint32Array(10005000);
+        framesBuffer[0] = 1;    // frames count on this level
+
+        framesBuffer[1] = 0;    // methodId
+        framesBuffer[2] = 0;    // x
+        framesBuffer[3] = count;
+        framesBuffer[4] = theOnlyChunksBufferPos;
+        framesBuffer[5] = firstChunkPosOfLongSamplesPos;
+        framesBuffer[6] = 0;    // direct samples count
+
+        let framesBufferPos = 7;
+
+        for (let storagePosIndex = 0; storagePosIndex < theOnlyChunksBufferPos; storagePosIndex++) {
+            const storagePos = theOnlyChunksBuffer[storagePosIndex];
+            framesBuffer[framesBufferPos++] = storagePos;
+            framesBuffer[framesBufferPos++] = theOnlyChunks[storagePos];
+        }
+
+        const longSamplesBuffer = new Uint32Array(totalCountLongSamples);
+        let longSamplesBufferPos = 0;
+        for (let storagePosIndex = 0; storagePosIndex < firstChunkPosOfLongSamplesPos; storagePosIndex++) {
+            const storagePos = firstChunkPosOfLongSamplesBuffer[storagePosIndex];
+            const count = firstChunkPosOfLongSamples[storagePos];
+            framesBuffer[framesBufferPos++] = storagePos;
+            framesBuffer[framesBufferPos++] = count;
+            framesBuffer[framesBufferPos++] = longSamplesBufferPos;
+
+            firstChunkPosOfLongSamples[storagePos] = longSamplesBufferPos;
+            longSamplesBufferPos += count;
+        }
 
         for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
             const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
             const chunkEndPos = sampleToChunkEnds[sampleIndex];
             const storagePos = chunksToStorage[chunkPos];
-            //if (chunkPos + 1 === chunkEndPos) {
-                theOnlyChunksSamples[(storagePos + storageSizes[storagePos]) * 2 + 1]++;
-            //} else {
-                sampleToChunkPos[sampleIndex] = chunkPos;
-                sampleToStorageDelta[sampleIndex] = storageSizes[storagePos];
-
-                framesBuffer[p++] = sampleIndex;
-            //}
-        }
-        //theOnlyChunksCount 218837
-        //other frames 200730
-        //same start 243784
-        framesBuffer[3] = p - 4;
-
-        let theOnlyChunksPointer = 1;
-        for (let storagePos = 1; storagePos < theOnlyChunksSamples.length; storagePos += 2) {
-            const count = theOnlyChunksSamples[storagePos];
-            if (count !== 0) {
-                theOnlyChunksSamples[theOnlyChunksPointer++] = storagePos;
-                theOnlyChunksSamples[theOnlyChunksPointer++] = count;
+            if (chunkPos + 1 !== chunkEndPos) {
+                longSamplesBuffer[firstChunkPosOfLongSamples[storagePos]++] = sampleIndex;
             }
         }
 
-        theOnlyChunksSamples[0] = theOnlyChunksPointer >>1;
-        console.log("theOnlyChunksCount", theOnlyChunksPointer >> 1);
-
-        return [framesBuffer, sampleToChunkPos, sampleToStorageDelta, theOnlyChunksSamples];
+        return [framesBuffer, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer];
     }
 
-    function nextFrames(frames, nextFrames, methodsBuffer, sampleToChunkPos, sampleToStorageDelta, theOnlyChunksSamples, level) {
+    function nextFrames(frames, nextFrames, methodsBuffers, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer, level) {
+        const out = {};
         let fp = 0;
         let np = 1; // for size
 
@@ -1077,11 +1149,26 @@
         const storage = currentHeatmap.blocksData.storage;
         const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
         const storageSizes = currentHeatmap.blocksData.storageSizes;
+        const methodsBuffer = methodsBuffers[0];
+        const methodsBufferTheOnlyChunks = methodsBuffers[1];
+        const methodsBufferLongSamples = methodsBuffers[2];
+        const methodsBufferDirectSamples = methodsBuffers[3];
+
+        const levelPlusOne = level + 1;
 
         for (let frame = 0; frame < framesCount; frame++) {
+            //console.log("!");
+            //console.log("read for frame from", frame, fp);
+
             const methodId = frames[fp++];
             let x = frames[fp++];
             const childrenCount = frames[fp++];
+
+            const theOnlyChunksCount = frames[fp++];
+            const longSamplesChunksCount = frames[fp++];
+            const directSamplesCount = frames[fp++];
+
+            //console.log("frame for level", frame, level, x, theOnlyChunksCount, longSamplesChunksCount, directSamplesCount);
 
             if (childrenCount !== 0) {  // FIXME
                 // TODO remove
@@ -1096,7 +1183,65 @@
             let totalChildren = 0;
             let prevFp = fp;
 
-            for (let child = 0; child < childrenCount; child++) {
+            for (let child = 0; child < theOnlyChunksCount; child++) {
+                const storagePos = frames[fp++];
+                const count = frames[fp++];
+                const size = storageSizes[storagePos];
+                if (size === level) {
+                    continue;
+                }
+                const methodId = storage[storagePos + size - levelPlusOne];
+
+                if ((methodsBuffer[methodId] += count) === count) {
+                    nextFrames[--methodsMapFirstPos] = methodId;
+                    //console.log('theOnly', methodId);
+                }
+                methodsBufferTheOnlyChunks[methodId]++;
+
+                totalChildren++;
+                //console.log("only chunk", methodId, methodsBufferTheOnlyChunks[methodId]);
+            }
+
+            for (let child = 0; child < longSamplesChunksCount; child++) {
+                const storagePos = frames[fp++];
+                const count = frames[fp++];
+                const longSamplesBufferPos = frames[fp++];
+                const size = storageSizes[storagePos];
+                if (size === level) {
+                    //console.log("size catch", size, level);
+                    for (let child = longSamplesBufferPos + count - 1; child >= longSamplesBufferPos; child--) {
+                        const sampleIndex = longSamplesBuffer[child];
+
+                        const chunkPos = (sampleToChunkEnds[sampleIndex - 1] || 0) + 1;
+                        const chunkEndPos = sampleToChunkEnds[sampleIndex];
+                        if (chunkPos === chunkEndPos) {
+                            continue;
+                        }
+
+                        const storagePos = chunksToStorage[chunkPos];
+                        const methodId = storage[storagePos + storageSizes[storagePos] - 1];
+
+                        if (methodsBuffer[methodId]++ === 0) {
+                            nextFrames[--methodsMapFirstPos] = methodId;
+                        }
+
+                        methodsBufferDirectSamples[methodId]++;
+                        totalChildren++;
+                    }
+                    continue;
+                }
+                const methodId = storage[storagePos + size - levelPlusOne];
+                //console.log('longSampleChunkHandle', methodId, title(methodId, {}));
+
+                if ((methodsBuffer[methodId] += count) === count) {
+                    nextFrames[--methodsMapFirstPos] = methodId;
+                }
+                methodsBufferLongSamples[methodId]++;
+
+                totalChildren++;
+            }
+
+            for (let child = 0; child < directSamplesCount; child++) {
                 const sampleIndex = frames[fp++];
                 const storageDelta = sampleToStorageDelta[sampleIndex] - level;
                 if (storageDelta <= 0) {    // fixme just === ?
@@ -1113,6 +1258,7 @@
                 if (methodsBuffer[methodId]++ === 0) {
                     nextFrames[--methodsMapFirstPos] = methodId;
                 }
+                methodsBufferDirectSamples[methodId]++;
 
                 totalChildren++;
             }
@@ -1133,16 +1279,94 @@
             for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
                 const methodId = nextFrames[i];
                 const count = methodsBuffer[methodId];
+                const theOnlyChunksCountForMethod = methodsBufferTheOnlyChunks[methodId];
+                const longSamplesChunksCountForMethod = methodsBufferLongSamples[methodId];
+                const directSamplesCount = methodsBufferDirectSamples[methodId];
+                //console.log("write for frame to", i - methodsMapFirstPos, pos);
                 nextFrames[pos++] = methodId;
                 nextFrames[pos++] = x;
                 nextFrames[pos++] = count;
+                nextFrames[pos++] = theOnlyChunksCountForMethod;
+                nextFrames[pos++] = longSamplesChunksCountForMethod;
+                nextFrames[pos++] = directSamplesCount;
+                //console.log("data for level", level, x, count, title(methodId, out));
+
                 x += count;
-                methodsBuffer[methodId] = pos;
-                pos += count;
+                methodsBufferTheOnlyChunks[methodId] = pos;
+                //for (let i = 0; i < theOnlyChunksCountForMethod * 2; i++) nextFrames[pos + i] = 12345670;
+                //console.log("methodsBufferTheOnlyChunks ", pos, theOnlyChunksCountForMethod * 2);
+                pos += theOnlyChunksCountForMethod * 2;
+                methodsBufferLongSamples[methodId] = pos;
+                //for (let i = 0; i < longSamplesChunksCountForMethod * 3; i++) nextFrames[pos + i] = 12345671;
+                //console.log("methodsBufferLongSamples ", pos, longSamplesChunksCountForMethod * 3);
+                pos += longSamplesChunksCountForMethod * 3;
+                methodsBufferDirectSamples[methodId] = pos;
+                //for (let i = 0; i < directSamplesCount; i++) nextFrames[pos + i] = 12345672;
+                //console.log("methodsBufferDirectSamples ", pos, directSamplesCount);
+                pos += directSamplesCount;
             }
 
             fp = prevFp;
-            for (let child = 0; child < childrenCount; child++) {
+            for (let child = 0; child < theOnlyChunksCount; child++) {
+                const storagePos = frames[fp++];
+                const count = frames[fp++];
+                const size = storageSizes[storagePos];
+                if (size === level) {
+                    continue;
+                }
+
+                const methodId = storage[storagePos + size - levelPlusOne];
+
+                //if (nextFrames[methodsBufferTheOnlyChunks[methodId]] !== 12345670) {
+                //    console.log("hello1 " + methodsBufferTheOnlyChunks[methodId] + " " + nextFrames[methodsBufferTheOnlyChunks[methodId]]);
+                //    throw "hello1 " + methodsBufferTheOnlyChunks[methodId] + " " + nextFrames[methodsBufferTheOnlyChunks[methodId]];
+                //}
+                nextFrames[methodsBufferTheOnlyChunks[methodId]++] = storagePos;
+                nextFrames[methodsBufferTheOnlyChunks[methodId]++] = count;
+            }
+
+            for (let child = 0; child < longSamplesChunksCount; child++) {
+                const storagePos = frames[fp++];
+                const count = frames[fp++];
+                const longSamplesBufferPos = frames[fp++];
+                const size = storageSizes[storagePos];
+                if (size === level) {
+                    for (let child = longSamplesBufferPos + count - 1; child >= longSamplesBufferPos; child--) {
+                        const sampleIndex = longSamplesBuffer[child];
+
+                        const chunkPos = (sampleToChunkEnds[sampleIndex - 1] || 0) + 1;
+                        const chunkEndPos = sampleToChunkEnds[sampleIndex];
+                        if (chunkPos === chunkEndPos) {
+                            continue;
+                        }
+
+                        sampleToChunkPos[sampleIndex] = chunkPos;
+                        const storagePos = chunksToStorage[chunkPos];
+                        sampleToStorageDelta[sampleIndex] = storageSizes[storagePos] + levelPlusOne;
+
+                        const methodId = storage[storagePos + storageSizes[storagePos] - 1];
+
+                        //if (nextFrames[methodsBufferDirectSamples[methodId]] !== 12345672) {
+                        //    console.log("hello2 " + methodId + " " + methodsBufferDirectSamples[methodId] + " " + nextFrames[methodsBufferDirectSamples[methodId]]);
+                        //    throw "hello2 " + methodsBufferDirectSamples[methodId] + " " + nextFrames[methodsBufferDirectSamples[methodId]];
+                        //}
+                        nextFrames[methodsBufferDirectSamples[methodId]++] = sampleIndex;
+                    }
+                    continue;
+                }
+
+                const methodId = storage[storagePos + size - levelPlusOne];
+
+                //if (nextFrames[methodsBufferLongSamples[methodId]] !== 12345671) {
+                //    console.log("hello3 " + methodsBufferLongSamples[methodId] + " " + nextFrames[methodsBufferLongSamples[methodId]]);
+                //    throw "hello3 " + methodsBufferLongSamples[methodId] + " " + nextFrames[methodsBufferLongSamples[methodId]];
+                //}
+                nextFrames[methodsBufferLongSamples[methodId]++] = storagePos;
+                nextFrames[methodsBufferLongSamples[methodId]++] = count;
+                nextFrames[methodsBufferLongSamples[methodId]++] = longSamplesBufferPos;
+            }
+
+            for (let child = 0; child < directSamplesCount; child++) {
                 const sampleIndex = frames[fp++];
                 let storageDelta = sampleToStorageDelta[sampleIndex] - level;
                 if (storageDelta <= 0) {    // fixme just === ?
@@ -1159,21 +1383,29 @@
                         sampleToChunkPos[sampleIndex] = chunkPos;
                         const storagePos = chunksToStorage[chunkPos];
                         storageDelta = storageSizes[storagePos];
-                        sampleToStorageDelta[sampleIndex] = storageDelta + level;
+                        sampleToStorageDelta[sampleIndex] = storageDelta + levelPlusOne;
                     }
                 }
 
                 const methodId = storage[storagePos];
-                const childPos = methodsBuffer[methodId]++;
 
-                nextFrames[childPos] = sampleIndex;
+                //if (nextFrames[methodsBufferDirectSamples[methodId]] !== 12345672) {
+                //    console.log("hello4 " + methodsBufferDirectSamples[methodId] + " " + nextFrames[methodsBufferDirectSamples[methodId]]);
+                //    throw "hello4 " + methodsBufferDirectSamples[methodId] + " " + nextFrames[methodsBufferDirectSamples[methodId]];
+                //}
+                nextFrames[methodsBufferDirectSamples[methodId]++] = sampleIndex;
             }
 
             for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
-                methodsBuffer[nextFrames[np++]] = 0;
-                np++;
-                np += nextFrames[np];
-                np++;
+                const methodId = nextFrames[np];
+
+                methodsBuffer[methodId] = 0;
+
+                methodsBufferTheOnlyChunks[methodId] = 0;
+                methodsBufferLongSamples[methodId] = 0;
+                methodsBufferDirectSamples[methodId] = 0;
+
+                np += nextFrames[np + 3] * 2 + nextFrames[np + 4] * 3 + nextFrames[np + 5] + 6;
             }
 
         }
@@ -1189,9 +1421,14 @@
             return false;
         }, function () {});
         addTask('flamePrepare', () => {
-            let [framesBuffer, sampleToChunkPos, sampleToStorageDelta, theOnlyChunksSamples] = prepareFrames(from, to);
+            let [framesBuffer, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer] = prepareFrames(from, to);
             let nextFramesBuffer = new Uint32Array(100050000);    // FIXME
-            const methodsBuffer = new Uint32Array(methods.data.length + 1);  // FIXME
+            const methodsBuffers = [
+                new Uint32Array(methods.data.length + 1),
+                new Uint32Array(methods.data.length + 1),
+                new Uint32Array(methods.data.length + 1),
+                new Uint32Array(methods.data.length + 1)
+            ];  // FIXME prealloc, use one buffer
 
             levels.length = 0;
 
@@ -1199,7 +1436,7 @@
             let methodInfoOut = {};
 
             addTask('flame', () => {
-                    const roots = nextFrames(framesBuffer, nextFramesBuffer, methodsBuffer, sampleToChunkPos, sampleToStorageDelta, theOnlyChunksSamples, levels.length);
+                    const roots = nextFrames(framesBuffer, nextFramesBuffer, methodsBuffers, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer, levels.length);
                     if (roots.length === 0) {
                         renderWithMatch(levels.length * 16, levels[0][0], 0);
                         return false;
@@ -1699,11 +1936,14 @@
         callHighlightRedraw(highlightStart, highlightEnd, 'Selection');
 
         const index = sample - currentHeatmap.startBlock();
-        const heatmap = currentHeatmap.heatmap();
-        if (index >= 0 && index < heatmap.length) {
-            const ms = startMs + currentHeatmap.currentTimeBlock() * index;
-            const total = heatmap[index];
-            const max = currentHeatmap.max();
+        const counts = currentHeatmap.blocksData.counts;
+        if (index >= 0 && index < counts.length) {
+            const countBeforeFirstBlock = counts[index - 1] || 0;
+            const countAtLastBlock = counts[index];
+
+            const ms = startMs + currentHeatmap.currentTimeSquareMs() * index;
+            const total = countAtLastBlock - countBeforeFirstBlock;
+            const max = currentHeatmap.max();   // fixme
             heatCanvas.title = new Date(ms).toLocaleTimeString(undefined, timeOptionsShort) + " " + index;  // FIXME
             const totalText = "total: " + total + " (" + Math.floor(total / max * 100) + "%)";
             const searchText = searchExecutedCount > index
@@ -1747,7 +1987,7 @@
             callHighlightRedraw(minSelected, maxSelected, 'Active');
             renderTraces(
                 Math.max(0, minSelected - currentHeatmap.startBlock()),
-                Math.min(currentHeatmap.heatmap().length - 1, maxSelected - currentHeatmap.startBlock())
+                Math.min(currentHeatmap.blocksData.counts.length - 1, maxSelected - currentHeatmap.startBlock())
             );
         }
     }
