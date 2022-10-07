@@ -120,6 +120,30 @@
 		levels[h] = [];
 	}
 
+    const H = Math.random() * 6;
+    const dX = 1 - Math.abs(H % 2 - 1);
+    let dR, dG, dB;
+    switch (H | 0) {
+        case 0:
+            dR = 1; dG = dX; dB = 0;
+            break;
+        case 1:
+            dR = dX; dG = 1; dB = 0;
+            break;
+        case 2:
+            dR = 0; dG = 1; dB = dX;
+            break;
+        case 3:
+            dR = 0; dG = dX; dB = 1;
+            break;
+        case 4:
+            dR = dX; dG = 0; dB = 1;
+            break;
+        case 5:
+            dR = 1; dG = 0; dB = dX;
+            break;
+    }
+
 	const canvas = document.getElementById('canvas');
 	let c = canvas.getContext('2d');
 	const hl = document.getElementById('hl');
@@ -1027,7 +1051,7 @@
             let color;
             let i = index - startBlock;
             if (i < 0 || i >= heatmap.length) {
-                color = '#ddd';
+                color = '#ddd';``
             } else {
                 let count = heatmap[i];
 
@@ -1045,13 +1069,10 @@
                         color = 'rgb(0,0,' + value + ')';
                     }
                 } else {
-                    if (ratio < 0.8) {
-                        let value = Math.round(255 - ratio * 255 / 0.8);
-                        color = 'rgb(255,' + value + ',' + value + ')';
-                    } else {
-                        let value = Math.round(255 - (ratio - 0.8) * 100 / 0.2);
-                        color = 'rgb('+ value + ',0,0)';
-                    }
+                    ratio *= 0.8;
+                    const C = 1 - Math.abs(1 - 2 * ratio);
+                    const m = (1 - ratio) - C / 2;
+                    color = 'rgb(' + (dR * C + m) * 255 + ',' + (dG * C + m) * 255 + ',' + (dB * C + m) * 255 + ')';
                 }
 
             }
