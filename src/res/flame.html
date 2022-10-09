@@ -1164,8 +1164,8 @@
         const storageSizes = currentHeatmap.blocksData.storageSizes;
         const counts = currentHeatmap.blocksData.counts;
 
-        const countBeforeFirstBlock = counts[from - 1] || 0;
-        const countAtLastBlock = counts[to] || counts[counts.length - 1];
+        const countBeforeFirstBlock = from > 0 ? (counts[from - 1] || counts[counts.length - 1]) : 0;
+        const countAtLastBlock = to >= 0 ? (counts[to] || counts[counts.length - 1]) : 0;
         const count = countAtLastBlock - countBeforeFirstBlock;
 
         const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
@@ -1189,7 +1189,6 @@
                 }
             } else {
                 if (firstChunkPosOfLongSamples[storagePos]++ === 0) {
-                    //console.log("longSample", title(currentHeatmap.blocksData.storage[storagePos + storageSizes[storagePos] - 1], {}));
                     firstChunkPosOfLongSamplesBuffer[firstChunkPosOfLongSamplesPos++] = storagePos;
                 }
                 totalCountLongSamples++;
@@ -1198,7 +1197,7 @@
 
         // fixme prealloc it with max possible size!
         const framesBuffer = new Uint32Array(10005000);
-        framesBuffer[0] = 1;    // frames count on this level
+        framesBuffer[0] = count === 0 ? 0 : 1;    // frames count on this level
 
         framesBuffer[1] = 0;    // methodId
         framesBuffer[2] = 0;    // x
@@ -1241,13 +1240,12 @@
     }
 
     function nextFrames(frames, nextFrames, methodsBuffers, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer, level) {
-        const out = {};
         let fp = 0;
         let np = 1; // for size
 
         const framesCount = frames[fp++];
         let nextFramesCount = 0;
-        const roots = new Array();
+        const roots = [];   // TODO it is temporary storage, looks like there is no need for that
 
         const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
         const storage = currentHeatmap.blocksData.storage;
@@ -1261,9 +1259,6 @@
         const levelPlusOne = level + 1;
 
         for (let frame = 0; frame < framesCount; frame++) {
-            //console.log("!");
-            //console.log("read for frame from", frame, fp);
-
             const methodId = frames[fp++];
             let x = frames[fp++];
             const childrenCount = frames[fp++];
@@ -1272,16 +1267,15 @@
             const longSamplesChunksCount = frames[fp++];
             const directSamplesCount = frames[fp++];
 
-            //console.log("frame for level", frame, level, x, theOnlyChunksCount, longSamplesChunksCount, directSamplesCount);
-
-            if (childrenCount !== 0) {  // FIXME
-                // TODO remove
-                roots.push({
-                    x: x,
-                    c: childrenCount,
-                    m: methodId
-                });
+            if (childrenCount === 0) {  // FIXME this should never happen
+                throw "o2";
             }
+            // TODO remove
+            roots.push({
+                x: x,
+                c: childrenCount,
+                m: methodId
+            });
 
             let methodsMapFirstPos = nextFrames.length;
             let totalChildren = 0;
@@ -1298,12 +1292,10 @@
 
                 if ((methodsBuffer[methodId] += count) === count) {
                     nextFrames[--methodsMapFirstPos] = methodId;
-                    //console.log('theOnly', methodId);
                 }
                 methodsBufferTheOnlyChunks[methodId]++;
 
                 totalChildren++;
-                //console.log("only chunk", methodId, methodsBufferTheOnlyChunks[methodId]);
             }
 
             for (let child = 0; child < longSamplesChunksCount; child++) {
@@ -1312,7 +1304,6 @@
                 const longSamplesBufferPos = frames[fp++];
                 const size = storageSizes[storagePos];
                 if (size === level) {
-                    //console.log("size catch", size, level);
                     for (let child = longSamplesBufferPos + count - 1; child >= longSamplesBufferPos; child--) {
                         const sampleIndex = longSamplesBuffer[child];
 
@@ -1335,7 +1326,6 @@
                     continue;
                 }
                 const methodId = storage[storagePos + size - levelPlusOne];
-                //console.log('longSampleChunkHandle', methodId, title(methodId, {}));
 
                 if ((methodsBuffer[methodId] += count) === count) {
                     nextFrames[--methodsMapFirstPos] = methodId;
@@ -1386,27 +1376,20 @@
                 const theOnlyChunksCountForMethod = methodsBufferTheOnlyChunks[methodId];
                 const longSamplesChunksCountForMethod = methodsBufferLongSamples[methodId];
                 const directSamplesCount = methodsBufferDirectSamples[methodId];
-                //console.log("write for frame to", i - methodsMapFirstPos, pos);
+
                 nextFrames[pos++] = methodId;
                 nextFrames[pos++] = x;
                 nextFrames[pos++] = count;
                 nextFrames[pos++] = theOnlyChunksCountForMethod;
                 nextFrames[pos++] = longSamplesChunksCountForMethod;
                 nextFrames[pos++] = directSamplesCount;
-                //console.log("data for level", level, x, count, title(methodId, out));
 
                 x += count;
                 methodsBufferTheOnlyChunks[methodId] = pos;
-                //for (let i = 0; i < theOnlyChunksCountForMethod * 2; i++) nextFrames[pos + i] = 12345670;
-                //console.log("methodsBufferTheOnlyChunks ", pos, theOnlyChunksCountForMethod * 2);
                 pos += theOnlyChunksCountForMethod * 2;
                 methodsBufferLongSamples[methodId] = pos;
-                //for (let i = 0; i < longSamplesChunksCountForMethod * 3; i++) nextFrames[pos + i] = 12345671;
-                //console.log("methodsBufferLongSamples ", pos, longSamplesChunksCountForMethod * 3);
                 pos += longSamplesChunksCountForMethod * 3;
                 methodsBufferDirectSamples[methodId] = pos;
-                //for (let i = 0; i < directSamplesCount; i++) nextFrames[pos + i] = 12345672;
-                //console.log("methodsBufferDirectSamples ", pos, directSamplesCount);
                 pos += directSamplesCount;
             }
 
@@ -1421,10 +1404,6 @@
 
                 const methodId = storage[storagePos + size - levelPlusOne];
 
-                //if (nextFrames[methodsBufferTheOnlyChunks[methodId]] !== 12345670) {
-                //    console.log("hello1 " + methodsBufferTheOnlyChunks[methodId] + " " + nextFrames[methodsBufferTheOnlyChunks[methodId]]);
-                //    throw "hello1 " + methodsBufferTheOnlyChunks[methodId] + " " + nextFrames[methodsBufferTheOnlyChunks[methodId]];
-                //}
                 nextFrames[methodsBufferTheOnlyChunks[methodId]++] = storagePos;
                 nextFrames[methodsBufferTheOnlyChunks[methodId]++] = count;
             }
@@ -1450,10 +1429,6 @@
 
                         const methodId = storage[storagePos + storageSizes[storagePos] - 1];
 
-                        //if (nextFrames[methodsBufferDirectSamples[methodId]] !== 12345672) {
-                        //    console.log("hello2 " + methodId + " " + methodsBufferDirectSamples[methodId] + " " + nextFrames[methodsBufferDirectSamples[methodId]]);
-                        //    throw "hello2 " + methodsBufferDirectSamples[methodId] + " " + nextFrames[methodsBufferDirectSamples[methodId]];
-                        //}
                         nextFrames[methodsBufferDirectSamples[methodId]++] = sampleIndex;
                     }
                     continue;
@@ -1461,10 +1436,6 @@
 
                 const methodId = storage[storagePos + size - levelPlusOne];
 
-                //if (nextFrames[methodsBufferLongSamples[methodId]] !== 12345671) {
-                //    console.log("hello3 " + methodsBufferLongSamples[methodId] + " " + nextFrames[methodsBufferLongSamples[methodId]]);
-                //    throw "hello3 " + methodsBufferLongSamples[methodId] + " " + nextFrames[methodsBufferLongSamples[methodId]];
-                //}
                 nextFrames[methodsBufferLongSamples[methodId]++] = storagePos;
                 nextFrames[methodsBufferLongSamples[methodId]++] = count;
                 nextFrames[methodsBufferLongSamples[methodId]++] = longSamplesBufferPos;
@@ -1493,10 +1464,6 @@
 
                 const methodId = storage[storagePos];
 
-                //if (nextFrames[methodsBufferDirectSamples[methodId]] !== 12345672) {
-                //    console.log("hello4 " + methodsBufferDirectSamples[methodId] + " " + nextFrames[methodsBufferDirectSamples[methodId]]);
-                //    throw "hello4 " + methodsBufferDirectSamples[methodId] + " " + nextFrames[methodsBufferDirectSamples[methodId]];
-                //}
                 nextFrames[methodsBufferDirectSamples[methodId]++] = sampleIndex;
             }
 
@@ -1504,7 +1471,6 @@
                 const methodId = nextFrames[np];
 
                 methodsBuffer[methodId] = 0;
-
                 methodsBufferTheOnlyChunks[methodId] = 0;
                 methodsBufferLongSamples[methodId] = 0;
                 methodsBufferDirectSamples[methodId] = 0;
@@ -1516,7 +1482,417 @@
 
         nextFrames[0] = nextFramesCount;
 
-        // fixme
+        return roots;
+    }
+
+    function prepareFramesDiff(from, to, baseFrom, baseTo) {
+        const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
+        const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
+        const storageSizes = currentHeatmap.blocksData.storageSizes;
+        const counts = currentHeatmap.blocksData.counts;
+
+        const countBeforeFirstBlock = from > 0 ? (counts[from - 1] || counts[counts.length - 1]) : 0;
+        const countAtLastBlock = to >= 0 ? (counts[to] || counts[counts.length - 1]) : 0;
+        const count = countAtLastBlock - countBeforeFirstBlock;
+
+        const baseCountBeforeFirstBlock = baseFrom > 0 ? (counts[baseFrom - 1] || counts[counts.length - 1]) : 0
+        const baseCountAtLastBlock = baseTo >= 0 ? (counts[baseTo] || counts[counts.length - 1]) : 0
+        const baseCount = baseCountAtLastBlock - baseCountBeforeFirstBlock;
+
+        const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
+        const sampleToChunkPos = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
+        const sampleToStorageDelta = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
+        const theOnlyChunks = new Uint32Array(storageSizes.length);   // fixme prealloc it!
+        const baseTheOnlyChunks = new Uint32Array(storageSizes.length);   // fixme prealloc it!
+
+        let theOnlyChunksBufferPos = 0;
+        let singleSamplesCount = 0;
+        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos + 1 === chunkEndPos) {
+                const storagePos = chunksToStorage[chunkPos];
+                if (theOnlyChunks[storagePos]++ === 0) {
+                    theOnlyChunksBuffer[theOnlyChunksBufferPos++] = storagePos;
+                }
+            } else {
+                singleSamplesCount++;
+            }
+        }
+
+        const theOnlyChunksCount = theOnlyChunksBufferPos;
+        let baseSingleSamplesCount = 0;
+        for (let sampleIndex = baseCountBeforeFirstBlock; sampleIndex < baseCountAtLastBlock; sampleIndex++) {
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos + 1 === chunkEndPos) {
+                const storagePos = chunksToStorage[chunkPos];
+                if (baseTheOnlyChunks[storagePos]++ === 0) {
+                    theOnlyChunksBuffer[theOnlyChunksBufferPos++] = storagePos;
+                }
+            } else {
+                baseSingleSamplesCount++;
+            }
+        }
+
+        // fixme prealloc it with max possible size!
+        const framesBuffer = new Uint32Array(10005000);
+        framesBuffer[0] = 1;    // frames count on this level
+
+        framesBuffer[1] = 0;    // methodId
+        framesBuffer[2] = 0;    // x
+        framesBuffer[3] = count;
+        framesBuffer[4] = theOnlyChunksCount;
+        framesBuffer[5] = singleSamplesCount;
+        framesBuffer[6] = baseCount;
+        framesBuffer[7] = theOnlyChunksBufferPos - theOnlyChunksCount;
+        framesBuffer[8] = baseSingleSamplesCount;
+
+        let framesBufferPos = 9;
+
+        for (let storagePosIndex = 0; storagePosIndex < theOnlyChunksCount; storagePosIndex++) {
+            const storagePos = theOnlyChunksBuffer[storagePosIndex];
+            framesBuffer[framesBufferPos++] = storagePos;
+            framesBuffer[framesBufferPos++] = theOnlyChunks[storagePos];
+        }
+
+        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos + 1 !== chunkEndPos) {
+                sampleToChunkPos[sampleIndex] = chunkPos;
+
+                const storagePos = chunksToStorage[chunkPos];
+                sampleToStorageDelta[sampleIndex] = storageSizes[storagePos] | 0x80000000;
+
+                framesBuffer[framesBufferPos++] = sampleIndex;
+            }
+        }
+
+        for (let storagePosIndex = theOnlyChunksCount; storagePosIndex < theOnlyChunksBufferPos; storagePosIndex++) {
+            const storagePos = theOnlyChunksBuffer[storagePosIndex];
+            framesBuffer[framesBufferPos++] = storagePos;
+            framesBuffer[framesBufferPos++] = baseTheOnlyChunks[storagePos];
+        }
+
+        for (let sampleIndex = baseCountBeforeFirstBlock; sampleIndex < baseCountAtLastBlock; sampleIndex++) {
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos + 1 !== chunkEndPos) {
+                if (sampleToStorageDelta[sampleIndex] === 0) {
+                    sampleToChunkPos[sampleIndex] = chunkPos;
+
+                    const storagePos = chunksToStorage[chunkPos];
+                    sampleToStorageDelta[sampleIndex] = storageSizes[storagePos];
+
+                    framesBuffer[framesBufferPos++] = sampleIndex;
+                }
+            }
+        }
+
+
+
+        return [framesBuffer, sampleToChunkPos, sampleToStorageDelta];
+    }
+
+    function nextFramesDiff(frames, nextFrames, methodsBuffers, sampleToChunkPos, sampleToStorageDelta, level) {
+        let fp = 0;
+        let np = 1; // for size
+
+        const framesCount = frames[fp++];
+        let nextFramesCount = 0;
+        const roots = [];   // TODO it is temporary storage, looks like there is no need for that
+
+        const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
+        const storage = currentHeatmap.blocksData.storage;
+        const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
+        const storageSizes = currentHeatmap.blocksData.storageSizes;
+        const methodsBuffer = methodsBuffers[0];
+        const methodsBufferTheOnlyChunks = methodsBuffers[1];
+        const methodsBufferDirectSamples = methodsBuffers[2];
+        const baseMethodsBuffer = methodsBuffers[3];
+        const baseMethodsBufferTheOnlyChunks = methodsBuffers[4];
+        const baseMethodsBufferDirectSamples = methodsBuffers[5];
+
+        const levelPlusOne = level + 1;
+
+        for (let frame = 0; frame < framesCount; frame++) {
+            const methodId = frames[fp++];
+            let x = frames[fp++];
+
+            const childrenCount = frames[fp++];
+            const theOnlyChunksCount = frames[fp++];
+            const directSamplesCount = frames[fp++];
+
+            const baseChildrenCount = frames[fp++];
+            const baseTheOnlyChunksCount = frames[fp++];
+            const baseDirectSamplesCount = frames[fp++];
+
+            // TODO optimize out
+            roots.push({
+                x: x,
+                c: childrenCount,
+                m: methodId,
+                b: baseChildrenCount
+            });
+
+            let methodsMapFirstPos = nextFrames.length;
+            let totalChildren = 0;
+            let prevFp = fp;
+
+            for (let child = 0; child < theOnlyChunksCount; child++) {
+                const storagePos = frames[fp++];
+                const count = frames[fp++];
+                if (count === 0) {  // FIXME this should never happen
+                    throw "oups3";
+                }
+                const size = storageSizes[storagePos];
+                if (size === level) {
+                    continue;
+                }
+                const methodId = storage[storagePos + size - levelPlusOne];
+
+                if ((methodsBuffer[methodId] += count) === count) {
+                    nextFrames[--methodsMapFirstPos] = methodId;
+                }
+                methodsBufferTheOnlyChunks[methodId]++;
+
+                totalChildren++;
+            }
+
+            for (let child = 0; child < directSamplesCount; child++) {
+                const sampleIndex = frames[fp++];
+                const storageDelta = (sampleToStorageDelta[sampleIndex] & 0x7fffffff) - level;
+                if (storageDelta <= 0) {
+                    continue;
+                }
+
+                const chunkPos = sampleToChunkPos[sampleIndex]
+                const storageStartPos = chunksToStorage[chunkPos];
+
+                const storagePos = storageStartPos + storageDelta - 1;
+
+                const methodId = storage[storagePos];
+
+                if (methodsBuffer[methodId]++ === 0) {
+                    nextFrames[--methodsMapFirstPos] = methodId;
+                }
+                methodsBufferDirectSamples[methodId]++;
+
+                totalChildren++;
+            }
+
+            /////////////////// BASE START
+            for (let child = 0; child < baseTheOnlyChunksCount; child++) {
+                const storagePos = frames[fp++];
+                const count = frames[fp++];
+                const size = storageSizes[storagePos];
+                if (size === level) {
+                    continue;
+                }
+                const methodId = storage[storagePos + size - levelPlusOne];
+
+                if (methodsBuffer[methodId] !== 0) {
+                    baseMethodsBuffer[methodId] += count;
+                    baseMethodsBufferTheOnlyChunks[methodId]++;
+                }
+            }
+
+            for (let child = 0; child < baseDirectSamplesCount; child++) {
+                const sampleIndex = frames[fp++];
+                const storageDelta = (sampleToStorageDelta[sampleIndex] & 0x7fffffff) - level;
+                if (storageDelta <= 0) {
+                    continue;
+                }
+
+                const chunkPos = sampleToChunkPos[sampleIndex];
+                const storageStartPos = chunksToStorage[chunkPos];
+
+                const storagePos = storageStartPos + storageDelta - 1;
+
+                const methodId = storage[storagePos];
+
+                if (methodsBuffer[methodId] !== 0) {
+                    baseMethodsBuffer[methodId]++;
+                    baseMethodsBufferDirectSamples[methodId]++;
+                }
+            }
+            /////////////////// BASE END
+
+            if (totalChildren === 0) {
+                continue;
+            }
+
+            let maxCount = 0;
+            for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
+                maxCount = Math.max(maxCount, methodsBuffer[nextFrames[i]]);
+            }
+            nextFramesCount += nextFrames.length - methodsMapFirstPos;
+            sort(nextFrames, methodsMapFirstPos, nextFrames.length, methodsBuffer, 1 << (31 - Math.clz32(maxCount)));
+
+            let pos = np;
+            for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
+                const methodId = nextFrames[i];
+                const count = methodsBuffer[methodId];
+                const theOnlyChunksCount = methodsBufferTheOnlyChunks[methodId];
+                const directSamplesCount = methodsBufferDirectSamples[methodId];
+
+                const baseCount = baseMethodsBuffer[methodId];
+                const baseTheOnlyChunksCount = baseMethodsBufferTheOnlyChunks[methodId];
+                const baseDirectSamplesCount = baseMethodsBufferDirectSamples[methodId];
+
+                nextFrames[pos++] = methodId;
+                nextFrames[pos++] = x;
+
+                nextFrames[pos++] = count;
+                nextFrames[pos++] = theOnlyChunksCount;
+                nextFrames[pos++] = directSamplesCount;
+
+                nextFrames[pos++] = baseCount;
+                nextFrames[pos++] = baseTheOnlyChunksCount;
+                nextFrames[pos++] = baseDirectSamplesCount;
+
+                x += count;
+
+                methodsBufferTheOnlyChunks[methodId] = pos;
+                for (let i = 0; i < theOnlyChunksCount * 2; i++) {
+                    nextFrames[pos + i] = 0x11223301;
+                }
+                pos += theOnlyChunksCount * 2;
+
+                methodsBufferDirectSamples[methodId] = pos;
+                for (let i = 0; i < directSamplesCount; i++) {
+                    nextFrames[pos + i] = 0x11223302;
+                }
+                pos += directSamplesCount;
+
+                baseMethodsBufferTheOnlyChunks[methodId] = pos;
+                for (let i = 0; i < baseTheOnlyChunksCount * 2; i++) {
+                    nextFrames[pos + i] = 0x11223303;
+                }
+                pos += baseTheOnlyChunksCount * 2;
+
+                baseMethodsBufferDirectSamples[methodId] = pos;
+                for (let i = 0; i < baseDirectSamplesCount; i++) {
+                    nextFrames[pos + i] = 0x11223304;
+                }
+                pos += baseDirectSamplesCount;
+            }
+
+            fp = prevFp;
+            for (let child = 0; child < theOnlyChunksCount; child++) {
+                const storagePos = frames[fp++];
+                const count = frames[fp++];
+                const size = storageSizes[storagePos];
+                if (size === level) {
+                    continue;
+                }
+
+                const methodId = storage[storagePos + size - levelPlusOne];
+
+                nextFrames[methodsBufferTheOnlyChunks[methodId]++] = storagePos;
+                nextFrames[methodsBufferTheOnlyChunks[methodId]++] = count;
+            }
+
+            for (let child = 0; child < directSamplesCount; child++) {
+                const sampleIndex = frames[fp++];
+                let storageDelta = (sampleToStorageDelta[sampleIndex] & 0x7fffffff) - level;
+                if (storageDelta <= 0) {
+                    sampleToStorageDelta[sampleIndex] = 0;
+                    continue;
+                }
+                let chunkPos = sampleToChunkPos[sampleIndex];
+                const storageStartPos = chunksToStorage[chunkPos];
+
+                const storagePos = storageStartPos + storageDelta - 1;
+
+                if (storageDelta === 1) {
+                    const chunkEnd = sampleToChunkEnds[sampleIndex] || chunksToStorage.length;
+                    if (++chunkPos !== chunkEnd) {
+                        sampleToChunkPos[sampleIndex] = chunkPos;
+                        const storagePos = chunksToStorage[chunkPos];
+                        storageDelta = storageSizes[storagePos];
+                        sampleToStorageDelta[sampleIndex] = (storageDelta + levelPlusOne) | 0x80000000;
+                    }
+                }
+
+                const methodId = storage[storagePos];
+
+                nextFrames[methodsBufferDirectSamples[methodId]++] = sampleIndex;
+            }
+
+
+
+
+            for (let child = 0; child < baseTheOnlyChunksCount; child++) {
+                const storagePos = frames[fp++];
+                const count = frames[fp++];
+                const size = storageSizes[storagePos];
+                if (size === level) {
+                    continue;
+                }
+
+                const methodId = storage[storagePos + size - levelPlusOne];
+
+                if (methodsBuffer[methodId] !== 0) {
+                    nextFrames[baseMethodsBufferTheOnlyChunks[methodId]++] = storagePos;
+                    nextFrames[baseMethodsBufferTheOnlyChunks[methodId]++] = count;
+                }
+            }
+
+            for (let child = 0; child < baseDirectSamplesCount; child++) {
+                const sampleIndex = frames[fp++];
+                const baseStorageDelta = sampleToStorageDelta[sampleIndex];
+                if ((baseStorageDelta & 0x80000000) !== 0) {
+                    continue;   // already done for this sample by not-based step
+                }
+                let storageDelta = baseStorageDelta - level;
+                if (storageDelta <= 0) {
+                    continue;
+                }
+
+                let chunkPos = sampleToChunkPos[sampleIndex];
+                const storageStartPos = chunksToStorage[chunkPos];
+
+                const storagePos = storageStartPos + storageDelta - 1;
+
+                if (storageDelta === 1) {
+                    const chunkEnd = sampleToChunkEnds[sampleIndex] || chunksToStorage.length;
+                    if (++chunkPos !== chunkEnd) {
+                        sampleToChunkPos[sampleIndex] = chunkPos;
+                        const storagePos = chunksToStorage[chunkPos];
+                        storageDelta = storageSizes[storagePos];
+                        sampleToStorageDelta[sampleIndex] = storageDelta + levelPlusOne;
+                    }
+                }
+
+                const methodId = storage[storagePos];
+
+                if (methodsBuffer[methodId] !== 0) {
+                    nextFrames[baseMethodsBufferDirectSamples[methodId]++] = sampleIndex;
+                }
+            }
+
+
+
+            for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
+                const methodId = nextFrames[np];
+
+                methodsBuffer[methodId] = 0;
+                methodsBufferTheOnlyChunks[methodId] = 0;
+                methodsBufferDirectSamples[methodId] = 0;
+
+                baseMethodsBuffer[methodId] = 0;
+                baseMethodsBufferTheOnlyChunks[methodId] = 0;
+                baseMethodsBufferDirectSamples[methodId] = 0;
+
+                np += (nextFrames[np + 3] + nextFrames[np + 6]) * 2 + (nextFrames[np + 4] + nextFrames[np + 7]) + 8;
+            }
+
+        }
+
+        nextFrames[0] = nextFramesCount;
+
         return roots;
     }
 
@@ -1542,6 +1918,11 @@
             addTask('flame', () => {
                     const roots = nextFrames(framesBuffer, nextFramesBuffer, methodsBuffers, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer, levels.length);
                     if (roots.length === 0) {
+                        if (levels.length === 0) {
+                            const t = title(0, methodInfoOut);
+                            let color = getColor(palette[methodInfoOut.type]);
+                            levels.push([{left: 0, width: 0, color: color, title: t}]);
+                        }
                         renderWithMatch(levels.length * 16, levels[0][0], 0);
                         return false;
                     }
@@ -1600,77 +1981,72 @@
     }
 
     function renderDiff(from, to, baseFrom, baseTo) {
-        let [frames, roots, levelsCount] = prepareFrames(from, to);
-        let [baseFrames, baseRoots,] = prepareFrames(baseFrom, baseTo);
-        roots[0].b = baseRoots[0];
+        let [framesBuffer, sampleToChunkPos, sampleToStorageDelta] = prepareFramesDiff(from, to, baseFrom, baseTo);
+        let nextFramesBuffer = new Uint32Array(100050000);    // FIXME
+        const methodsBuffers = [
+            new Uint32Array(methods.data.length + 1),
+            new Uint32Array(methods.data.length + 1),
+            new Uint32Array(methods.data.length + 1),
+            new Uint32Array(methods.data.length + 1),
+            new Uint32Array(methods.data.length + 1),
+            new Uint32Array(methods.data.length + 1)
+        ];  // FIXME prealloc, use one buffer
 
         levels.length = 0;
-        for (let i = 0; i < levelsCount; i++) {
-            levels.push([]);
-        }
-        let currentLevel = 0;
+
         let levelToRedraw = 0;
         let methodInfoOut = {};
 
-        let minDiff = 0;
-        let maxDiff = 0;
+        let minDiff = 1;
+        let maxDiff = 1;
 
         addTask('flame', function () {
-                nextFrames(frames, currentLevel);
-                nextFrames(baseFrames, currentLevel);
-                let level = levels[currentLevel];
-
-                for (let root of roots) {
-                    let wasCount = root.b === undefined ? 0 : root.b.c;
-                    if (wasCount !== 0) {
-                        maxDiff = Math.max(maxDiff, root.c - wasCount);
-                        minDiff = Math.min(minDiff, root.c - wasCount)
-                    }
+                const roots = nextFramesDiff(framesBuffer, nextFramesBuffer, methodsBuffers, sampleToChunkPos, sampleToStorageDelta, levels.length);
+                if (roots.length === 0) {
+                    renderWithMatch(levels.length * 16, levels[0][0], 0);
+                    return false;
                 }
 
-                let nextRoots = [];
                 for (let root of roots) {
-                    let x = root.x;
-
-                    let wasCount = root.b === undefined ? 0 : root.b.c;
-                    const t = title(root.m, methodInfoOut) + " (" + root.c + "/" + wasCount + ")";
-                    let color;
-                    if (wasCount === 0) {
-                        color = "#dac571";
-                    } else if (wasCount >= root.c) {
-                        const ratio = (root.c - wasCount) / minDiff;
-                        color = 'rgb(' + (245 - 90 * ratio) + ',' + (250 - 90 * ratio) + ',' + 255 + ')';
+                    if (root.b >= root.c) {
+                        minDiff = Math.max(minDiff, root.b - root.c);
                     } else {
-                        const ratio = (root.c - wasCount) / maxDiff;
-                        color = 'rgb(' + 255 + ',' + (245 - 180 * ratio) + ',' + (240 - 200 * ratio) + ')';
-                    }
-                    level.push({left: x, width: root.c, color: color, title: t});
-
-                    let nextFrames = [];
-                    for (let [methodId, frame] of root) {
-                        frame.b = root.b && root.b.get(methodId);
-                        nextFrames.push(frame);
-                    }
-                    nextFrames.sort((k1, k2) => k2.c - k1.c);
-                    for (let frame of nextFrames) {
-                        frame.x = x;
-                        x += frame.c;
-                        nextRoots.push(frame);
+                        maxDiff = Math.max(maxDiff, root.c - root.b);
                     }
                 }
-                level.sort((k1, k2) => k1.left - k2.left);
 
-                roots = nextRoots;
-                currentLevel++;
-                if (currentLevel < levelsCount) {
-                    return true;
+                let level = new Array(roots.length);
+                let i = 0;
+                for (let root of roots) {
+                    const t = title(root.m, methodInfoOut) + " (" + root.c + "/" + root.b + ")";
+                    let color;
+                    if (root.b === 0) {
+                        color = "#dac571";
+                    } else if (root.b >= root.c) {
+                        const ratio = (root.b - root.c) / minDiff;
+                        color = 'rgb(' + (225 - 90 * ratio) + ',' + (250 - 90 * ratio) + ',' + 255 + ')';
+                    } else {
+                        const ratio = (root.c - root.b) / maxDiff;
+                        color = 'rgb(' + 255 + ',' + (225 - 180 * ratio) + ',' + (240 - 200 * ratio) + ')';
+                    }
+                    level[i++] = {
+                        left: root.x,
+                        width: root.c,
+                        color: color,
+                        title: t
+                    };
                 }
-                renderWithMatch(levelsCount * 16, levels[0][0], 0);
-                return false;
+
+                const tmpBuffer = nextFramesBuffer;
+                nextFramesBuffer = framesBuffer;
+                framesBuffer = tmpBuffer;
+
+                levels.push(level);
+                return true;
             },
             function () {
                 renderWithMatch(4096, levels[0][0], 0, levelToRedraw);
-                levelToRedraw = currentLevel;
+                levelToRedraw = levels.length;
             });
     }
 
