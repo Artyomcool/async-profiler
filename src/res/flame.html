@@ -618,9 +618,9 @@
             let b;
             do {
                 b = this.byteAt(this.pos++);
-                res += (b % 60) * shift;
-                shift *= 60;
-            } while (b >= 60)
+                res += (b % 61) * shift;
+                shift *= 61;
+            } while (b >= 61);
             return res;
         }
 
@@ -931,13 +931,11 @@
         1,              // 20 ms
         50,             // 1 s
         50 * 5,         // 5 s
-        50 * 60         // 1 m
     ];
     const zoomToHeight = [
         50,
         60,
         60,
-        60
     ];
     const zoomToText = [
         ' 1 sec : 20 ms ',
@@ -1068,7 +1066,8 @@
                 let overflow = false;
                 do {
                     let task = bgTasks[nextTask];
-                    if (task.f()) {
+                    let runAgain = task.f();
+                    if (runAgain) {
                         nextTask++;
                     } else {
                         bgTasks.splice(nextTask, 1);
@@ -1267,9 +1266,6 @@
             const longSamplesChunksCount = frames[fp++];
             const directSamplesCount = frames[fp++];
 
-            if (childrenCount === 0) {  // FIXME this should never happen
-                throw "o2";
-            }
             // TODO remove
             roots.push({
                 x: x,
@@ -1308,10 +1304,6 @@
                         const sampleIndex = longSamplesBuffer[child];
 
                         const chunkPos = (sampleToChunkEnds[sampleIndex - 1] || 0) + 1;
-                        const chunkEndPos = sampleToChunkEnds[sampleIndex];
-                        if (chunkPos === chunkEndPos) {
-                            continue;
-                        }
 
                         const storagePos = chunksToStorage[chunkPos];
                         const methodId = storage[storagePos + storageSizes[storagePos] - 1];
@@ -1361,11 +1353,13 @@
                 continue;
             }
 
+            const methodCount = nextFrames.length - methodsMapFirstPos;
+
             let maxCount = 0;
             for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
                 maxCount = Math.max(maxCount, methodsBuffer[nextFrames[i]]);
             }
-            nextFramesCount += nextFrames.length - methodsMapFirstPos;
+            nextFramesCount += methodCount;
 
             sort(nextFrames, methodsMapFirstPos, nextFrames.length, methodsBuffer, 1 << (31 - Math.clz32(maxCount)));
 
@@ -1418,10 +1412,6 @@
                         const sampleIndex = longSamplesBuffer[child];
 
                         const chunkPos = (sampleToChunkEnds[sampleIndex - 1] || 0) + 1;
-                        const chunkEndPos = sampleToChunkEnds[sampleIndex];
-                        if (chunkPos === chunkEndPos) {
-                            continue;
-                        }
 
                         sampleToChunkPos[sampleIndex] = chunkPos;
                         const storagePos = chunksToStorage[chunkPos];
@@ -1584,9 +1574,8 @@
 
                     const storagePos = chunksToStorage[chunkPos];
                     sampleToStorageDelta[sampleIndex] = storageSizes[storagePos];
-
-                    framesBuffer[framesBufferPos++] = sampleIndex;
                 }
+                framesBuffer[framesBufferPos++] = sampleIndex;
             }
         }
 
@@ -1638,14 +1627,11 @@
 
             let methodsMapFirstPos = nextFrames.length;
             let totalChildren = 0;
-            let prevFp = fp;
+            const prevFp = fp;
 
             for (let child = 0; child < theOnlyChunksCount; child++) {
                 const storagePos = frames[fp++];
                 const count = frames[fp++];
-                if (count === 0) {  // FIXME this should never happen
-                    throw "oups3";
-                }
                 const size = storageSizes[storagePos];
                 if (size === level) {
                     continue;
@@ -1683,6 +1669,7 @@
             }
 
             /////////////////// BASE START
+            const prevBaseFp = fp;
             for (let child = 0; child < baseTheOnlyChunksCount; child++) {
                 const storagePos = frames[fp++];
                 const count = frames[fp++];
@@ -1731,6 +1718,7 @@
             sort(nextFrames, methodsMapFirstPos, nextFrames.length, methodsBuffer, 1 << (31 - Math.clz32(maxCount)));
 
             let pos = np;
+            const endFp = fp;
             for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
                 const methodId = nextFrames[i];
                 const count = methodsBuffer[methodId];
@@ -1755,28 +1743,65 @@
                 x += count;
 
                 methodsBufferTheOnlyChunks[methodId] = pos;
-                for (let i = 0; i < theOnlyChunksCount * 2; i++) {
-                    nextFrames[pos + i] = 0x11223301;
-                }
                 pos += theOnlyChunksCount * 2;
 
                 methodsBufferDirectSamples[methodId] = pos;
-                for (let i = 0; i < directSamplesCount; i++) {
-                    nextFrames[pos + i] = 0x11223302;
-                }
                 pos += directSamplesCount;
 
                 baseMethodsBufferTheOnlyChunks[methodId] = pos;
-                for (let i = 0; i < baseTheOnlyChunksCount * 2; i++) {
-                    nextFrames[pos + i] = 0x11223303;
-                }
                 pos += baseTheOnlyChunksCount * 2;
 
                 baseMethodsBufferDirectSamples[methodId] = pos;
-                for (let i = 0; i < baseDirectSamplesCount; i++) {
-                    nextFrames[pos + i] = 0x11223304;
-                }
                 pos += baseDirectSamplesCount;
+            }
+
+            fp = prevBaseFp;
+            for (let child = 0; child < baseTheOnlyChunksCount; child++) {
+                const storagePos = frames[fp++];
+                const count = frames[fp++];
+                const size = storageSizes[storagePos];
+                if (size === level) {
+                    continue;
+                }
+
+                const methodId = storage[storagePos + size - levelPlusOne];
+
+                if (methodsBuffer[methodId] !== 0) {
+                    nextFrames[baseMethodsBufferTheOnlyChunks[methodId]++] = storagePos;
+                    nextFrames[baseMethodsBufferTheOnlyChunks[methodId]++] = count;
+                }
+            }
+
+            for (let child = 0; child < baseDirectSamplesCount; child++) {
+                const sampleIndex = frames[fp++];
+                const baseStorageDelta = sampleToStorageDelta[sampleIndex];
+                let storageDelta = (baseStorageDelta & 0x7fffffff) - level;
+                if (storageDelta <= 0) {
+                    continue;
+                }
+
+                let chunkPos = sampleToChunkPos[sampleIndex];
+                const storageStartPos = chunksToStorage[chunkPos];
+
+                const storagePos = storageStartPos + storageDelta - 1;
+
+                if (storageDelta === 1 &&
+                    // will be done for this sample by not-based step
+                    (baseStorageDelta & 0x80000000) === 0) {
+                    const chunkEnd = sampleToChunkEnds[sampleIndex] || chunksToStorage.length;
+                    if (++chunkPos !== chunkEnd) {
+                        sampleToChunkPos[sampleIndex] = chunkPos;
+                        const storagePos = chunksToStorage[chunkPos];
+                        storageDelta = storageSizes[storagePos];
+                        sampleToStorageDelta[sampleIndex] = storageDelta + levelPlusOne;
+                    }
+                }
+
+                const methodId = storage[storagePos];
+
+                if (methodsBuffer[methodId] !== 0) {
+                    nextFrames[baseMethodsBufferDirectSamples[methodId]++] = sampleIndex;
+                }
             }
 
             fp = prevFp;
@@ -1820,59 +1845,7 @@
 
                 nextFrames[methodsBufferDirectSamples[methodId]++] = sampleIndex;
             }
-
-
-
-
-            for (let child = 0; child < baseTheOnlyChunksCount; child++) {
-                const storagePos = frames[fp++];
-                const count = frames[fp++];
-                const size = storageSizes[storagePos];
-                if (size === level) {
-                    continue;
-                }
-
-                const methodId = storage[storagePos + size - levelPlusOne];
-
-                if (methodsBuffer[methodId] !== 0) {
-                    nextFrames[baseMethodsBufferTheOnlyChunks[methodId]++] = storagePos;
-                    nextFrames[baseMethodsBufferTheOnlyChunks[methodId]++] = count;
-                }
-            }
-
-            for (let child = 0; child < baseDirectSamplesCount; child++) {
-                const sampleIndex = frames[fp++];
-                const baseStorageDelta = sampleToStorageDelta[sampleIndex];
-                if ((baseStorageDelta & 0x80000000) !== 0) {
-                    continue;   // already done for this sample by not-based step
-                }
-                let storageDelta = baseStorageDelta - level;
-                if (storageDelta <= 0) {
-                    continue;
-                }
-
-                let chunkPos = sampleToChunkPos[sampleIndex];
-                const storageStartPos = chunksToStorage[chunkPos];
-
-                const storagePos = storageStartPos + storageDelta - 1;
-
-                if (storageDelta === 1) {
-                    const chunkEnd = sampleToChunkEnds[sampleIndex] || chunksToStorage.length;
-                    if (++chunkPos !== chunkEnd) {
-                        sampleToChunkPos[sampleIndex] = chunkPos;
-                        const storagePos = chunksToStorage[chunkPos];
-                        storageDelta = storageSizes[storagePos];
-                        sampleToStorageDelta[sampleIndex] = storageDelta + levelPlusOne;
-                    }
-                }
-
-                const methodId = storage[storagePos];
-
-                if (methodsBuffer[methodId] !== 0) {
-                    nextFrames[baseMethodsBufferDirectSamples[methodId]++] = sampleIndex;
-                }
-            }
-
+            fp = endFp;
 
 
             for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
@@ -1915,8 +1888,12 @@
             let levelToRedraw = 0;
             let methodInfoOut = {};
 
+            let pp = 0;
+
             addTask('flame', () => {
+                    const p = performance.now();
                     const roots = nextFrames(framesBuffer, nextFramesBuffer, methodsBuffers, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer, levels.length);
+                    pp += performance.now() - p;
                     if (roots.length === 0) {
                         if (levels.length === 0) {
                             const t = title(0, methodInfoOut);
@@ -1924,7 +1901,8 @@
                             levels.push([{left: 0, width: 0, color: color, title: t}]);
                         }
                         renderWithMatch(levels.length * 16, levels[0][0], 0);
-                        return false;
+                        console.log("ALL PERF", pp);    //3911.299999922514 763.5999992787838 2337.800000876188
+                        return false;                               //4680.600000172853 794.4000008404255 3045.600001811981
                     }
 
                     let level = new Array(roots.length);
@@ -2210,22 +2188,9 @@
         if (!r) {
             pattern = undefined;
             redrawHeatMap();
-            addTask('search', function () {
-                return false;
-            }, function () {
-            });
             return;
         }
-        let renderFrom = 0;
-        let heatmap = currentHeatmap.heatmap();
-        let count = heatmap.length;
-        found = new Uint32Array(count);
-        let start = currentHeatmap.startBlock();
-
-        function renderFunc() {
-            redrawHeatSamples(start + renderFrom, start + searchExecutedCount - 1);
-            renderFrom = searchExecutedCount;
-        }
+        const counts = currentHeatmap.blocksData.counts;
 
         pattern = r ? RegExp(r) : undefined;
         const matchedMethods = new Set();
@@ -2236,47 +2201,45 @@
             }
         }
 
-        let mul = zoomToGroupSize[currentHeatmap.zoom];
+        const storage = currentHeatmap.blocksData.storage;
+        const storageSizes = currentHeatmap.blocksData.storageSizes;
+        const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
+        const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
+        const marks = new Uint8Array(storage.length);
+        for (let storagePos = 0; storagePos < storage.length; storagePos++) {
+            if (matchedMethods.has(storage[storagePos])) {
+                do {
+                    marks[storagePos] = 1;
+                } while (storageSizes[storagePos] !== 1 && ++storagePos < storage.length);
+            }
+        }
 
-        addTask('search', function () {
-            let amount = 0;
-            const from = searchExecutedCount * mul;
-            const to = (searchExecutedCount + 1) * mul;
-            for (let i = from; i < to; i++) {
-                const stacks = currentHeatmap.blocks[i];
-                if (stacks === undefined) {
-                    continue;
-                }
-
-                for (let stack of stacks) {
-                    for (let methodIndex of stack) {
-                        if (matchedMethods.has(methodIndex)) {
-                            amount++;
-                            break;
-                        }
+        found = new Uint32Array(counts.length);
+        let s = 0;
+        let p = 0;
+        for (let c = 0; c < counts.length; c++) {
+            for (; s < counts[c]; s++) {
+                for (; p < sampleToChunkEnds[s]; p++) {
+                    const storagePos = chunksToStorage[p];
+                    if (marks[storagePos] > 0) {
+                        found[c]++;
+                        break;
                     }
                 }
             }
+        }
 
-            if (searchMax < amount) {
-                renderFrom = 0;
-                searchMax = amount;
-            }
+        searchMax = 0;
+        for (let f of found) {
+            searchMax = Math.max(searchMax, f);
+        }
+        searchExecutedCount = counts.length;
+        redrawHeatMap();
 
-            found[searchExecutedCount] = amount;
-            searchExecutedCount++;
-            if (searchExecutedCount >= count) {
-                renderFunc();
-
-                const matched = render(root, rootLevel);
-                document.getElementById('matchval').textContent = pct(matched, root.width) + '%';
-                document.getElementById('match').style.display = r ? 'inherit' : 'none';
-                document.getElementById('produced').style.display = r ? 'none' : 'inherit';
-
-                return false;
-            }
-            return true;
-        }, renderFunc);
+        const matched = render(root, rootLevel);
+        document.getElementById('matchval').textContent = pct(matched, root.width) + '%';
+        document.getElementById('match').style.display = r ? 'inherit' : 'none';
+        document.getElementById('produced').style.display = r ? 'none' : 'inherit';
 
     }
 
@@ -2325,7 +2288,7 @@
     });
 
     document.getElementById('heatmap-height-line').onclick = function () {
-        fillCanvasWithEvents((currentHeatmap.maxZoom + currentHeatmap.zoom - 1) % (currentHeatmap.maxZoom));
+        fillCanvasWithEvents((zoomToGroupSize.length + currentHeatmap.zoom - 1) % (zoomToGroupSize.length));
         highlightStart = highlightEnd = heatDiffStart = heatDiffEnd = heatActiveSample1 = heatActiveSample2 = -1;
         for (let suffix of ['Selection', 'Diff', 'Active']) {
             for (let prefix of ['left', 'leftMiddle', 'middle', 'rightMiddle', 'right']) {
@@ -2415,11 +2378,11 @@
 
         callHighlightRedraw(highlightStart, highlightEnd, 'Selection');
 
-        const index = sample - currentHeatmap.startBlock();
+        const index = (sample - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale;
         const counts = currentHeatmap.blocksData.counts;
         if (index >= 0 && index < counts.length) {
             const countBeforeFirstBlock = counts[index - 1] || 0;
-            const countAtLastBlock = counts[index];
+            const countAtLastBlock = counts[index + currentHeatmap.timeSquareScale - 1] || counts[counts.length - 1];
 
             const ms = startMs + currentHeatmap.currentTimeSquareMs() * index;
             const total = countAtLastBlock - countBeforeFirstBlock;
@@ -2446,10 +2409,10 @@
 
             callHighlightRedraw(highlightStart, highlightEnd, 'Diff');
             renderDiff(
-                minSelected - currentHeatmap.startBlock(),
-                maxSelected - currentHeatmap.startBlock(),
-                heatDiffStart - currentHeatmap.startBlock(),
-                heatDiffEnd - currentHeatmap.startBlock()
+                (minSelected - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
+                (maxSelected - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1,
+                (heatDiffStart - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
+                (heatDiffEnd - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1
             );
         } else {
             heatDiffStart = -1;
@@ -2466,8 +2429,8 @@
             callHighlightRedraw(highlightStart, highlightEnd, 'Diff');
             callHighlightRedraw(minSelected, maxSelected, 'Active');
             renderTraces(
-                Math.max(0, minSelected - currentHeatmap.startBlock()),
-                Math.min(currentHeatmap.blocksData.counts.length - 1, maxSelected - currentHeatmap.startBlock())
+                (minSelected - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
+                (maxSelected - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1
             );
         }
     }
@@ -2488,6 +2451,7 @@
         }
     });
 
+    let moved = false;
     heatCanvas.onmousemove = function (event) {
         let x = Math.floor((event.offsetX + heatCanvasContainer.scrollLeft - canvasScrollPadding) / sqPx);
         let y = Math.floor(Math.max(0, event.offsetY - canvasTimeHeightPx) / sqPx);
@@ -2500,6 +2464,7 @@
         } else {
             callSelectionRedraw(heatLastSample, event.shiftKey, event.ctrlKey);
         }
+        moved = true;
     }
 
     heatCanvas.onmouseout = function () {
@@ -2512,14 +2477,17 @@
         let sample = x * currentHeatmap.timeSquareRowsCount + y;
 
         callActiveRedraw(sample, event.shiftKey, event.ctrlKey);
+        moved = false;
     };
 
     heatCanvas.onmouseup = function (event) {
-        let x = Math.floor((event.offsetX + heatCanvasContainer.scrollLeft - canvasScrollPadding) / sqPx);
-        let y = Math.floor(Math.max(0, event.offsetY - canvasTimeHeightPx) / sqPx);
-        let sample = x * currentHeatmap.timeSquareRowsCount + y;
+        if (moved) {
+            let x = Math.floor((event.offsetX + heatCanvasContainer.scrollLeft - canvasScrollPadding) / sqPx);
+            let y = Math.floor(Math.max(0, event.offsetY - canvasTimeHeightPx) / sqPx);
+            let sample = x * currentHeatmap.timeSquareRowsCount + y;
 
-        callActiveRedraw(sample, true, event.ctrlKey);
+            callActiveRedraw(sample, true, event.ctrlKey);
+        }
     };
 
     /*end if heatmap js*/

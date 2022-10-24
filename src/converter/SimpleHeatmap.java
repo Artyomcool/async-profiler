@@ -289,16 +289,11 @@ public class SimpleHeatmap extends ResourceProcessor {
 
     }
 
-    // 37
-    // 28
-
-
-    // 84.4
-    // 60
-
     private void printHeatmap(Output out, EvaluationContext context) {
+        Histogram histogram = new Histogram();
+
         int veryStart = out.pos();
-        int synonymsCount = 60 * 60;
+        int synonymsCount = 61 * 61;
 
         int nextId = synonymsCount;
         LzNode root = new LzNode(nextId++);
@@ -306,7 +301,6 @@ public class SimpleHeatmap extends ResourceProcessor {
         List<LzNode> allNodes = new ArrayList<>();
         allNodes.add(root);
 
-        List<LzNode>[] blocksData = new ArrayList[context.stackTraces.length];
         int stacksCount = 0;
         for (SampleBlock block : context.blocks) {
             for (int i = 0; i < block.stacks.size; i++) {
@@ -314,13 +308,6 @@ public class SimpleHeatmap extends ResourceProcessor {
                 LzNode current = root;
                 int stackId = block.stacks.list[i];
                 int[] stack = context.stackTraces[stackId - 1];
-
-                List<LzNode> bestSample = blocksData[stackId - 1];
-                if (bestSample == null) {
-                    blocksData[stackId - 1] = bestSample = new ArrayList<>();
-                } else {
-                    bestSample.clear();
-                }
 
                 for (int methodId : stack) {
                     LzNode prev = current;
@@ -333,13 +320,7 @@ public class SimpleHeatmap extends ResourceProcessor {
 
                         prev.count++;
                         context.orderedMethods[methodId - 1].tmp++;
-                        bestSample.add(prev);
                     }
-                }
-                if (current != root) {
-                    bestSample.add(current);
-                } else {
-                    bestSample.add(allNodes.get(allNodes.size() - 1));
                 }
             }
         }
@@ -365,6 +346,10 @@ public class SimpleHeatmap extends ResourceProcessor {
             }
         });
 
+        for (LzNode node : allNodes) {
+            histogram.add(node.count, "node count");
+        }
+
         IndexInt starts = new IndexInt();
         starts.index(context.methods.size() + 1);
 
@@ -382,8 +367,6 @@ public class SimpleHeatmap extends ResourceProcessor {
         for (int method : startsOut) {
             out.writeVar(method);
         }
-
-        Histogram histogram = new Histogram();
 
         int was = out.pos();
         {
@@ -469,6 +452,7 @@ public class SimpleHeatmap extends ResourceProcessor {
 
         System.out.println("before bodies " + (out.pos() - veryStart));
         was = out.pos();
+        List<LzNode>[] blocksData = new ArrayList[context.stackTraces.length];
         for (SampleBlock block : context.blocks) {
             for (int i = 0; i < block.stacks.size; i++) {
                 LzNode current = root;
@@ -476,7 +460,11 @@ public class SimpleHeatmap extends ResourceProcessor {
                 int[] stack = context.stackTraces[stackId - 1];
 
                 List<LzNode> bestSample = blocksData[stackId - 1];
-                bestSample.clear();
+                if (bestSample == null) {
+                    blocksData[stackId - 1] = bestSample = new ArrayList<>();
+                } else {
+                    bestSample.clear();
+                }
 
                 for (int methodId : stack) {
                     LzNode prev = current;
@@ -766,13 +754,10 @@ public class SimpleHeatmap extends ResourceProcessor {
 
         @Override
         public void writeVar(long v) {
-            if (v < 0) {
-                throw new IllegalArgumentException(v + "");
-            }
-            while (v >= 60) {
-                int b = 60 + (int) (v % 60);
+            while (v >= 61) {
+                int b = 61 + (int) (v % 61);
                 nextByte(b);
-                v /= 60;
+                v /= 61;
             }
             nextByte((int) v);
         }
