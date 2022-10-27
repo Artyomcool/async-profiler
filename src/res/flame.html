@@ -2055,10 +2055,9 @@
         const max = currentHeatmap.max(patternDraw);
         const counts = patternDraw ? currentHeatmap.blocksData.foundCounts : currentHeatmap.blocksData.counts;
 
-        for (let index = from; index <= to; index += scale) {
+        for (let index = from; index <= to; index++) {
             let color;
-            const i = index - startBlock;
-            const firstCountsIndex = i * scale;
+            const firstCountsIndex = (index - startBlock) * scale;
             const afterLastCountsIndex = firstCountsIndex + scale;
             if (afterLastCountsIndex <= 0 || firstCountsIndex >= counts.length) {
                 color = '#ddd';
