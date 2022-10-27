@@ -1,6 +1,7 @@
 import one.jfr.*;
 import one.jfr.Dictionary;
 import one.jfr.event.AllocationSample;
+import one.jfr.event.ContendedLock;
 import one.jfr.event.Event;
 import one.jfr.event.ExecutionSample;
 
@@ -102,8 +103,8 @@ public class SimpleHeatmap extends ResourceProcessor {
             }
         };
 
-        int procent = 0;
-        int pp = 0;
+        long procent = 0;
+        long pp = 0;
 
         for (Event execution : samples) {
             if (pp * 100 / samples.size() != procent) {
@@ -126,7 +127,7 @@ public class SimpleHeatmap extends ResourceProcessor {
             }
 
             StackTrace originalTrace = stacks.getOrDefault(execution.stackTraceId, UNKNOWN_STACK);
-            stackTrace = new int[originalTrace.methods.length + (alloc ? 1 : 0)];
+            stackTrace = new int[originalTrace.methods.length + ((execution instanceof AllocationSample || execution instanceof ContendedLock) ? 1 : 0)];
 
             for (int i = originalTrace.methods.length - 1; i >= 0; i--) {
                 long methodId = originalTrace.methods[i];
@@ -150,13 +151,21 @@ public class SimpleHeatmap extends ResourceProcessor {
                 Method method = new Method(className, methodName, location, type, index == 0);
                 stackTrace[index] = methodIndex.index(method);
             }
-            if (alloc) {
+            if (execution instanceof AllocationSample) {
                 ClassRef classRef = classRefs.getOrDefault(execution.extra(), UNKNOWN_CLASS_REF);
                 byte[] classNameBytes = this.symbols.get(classRef.name);
                 String classNameString = classNameBytes == null ? UNKNOWN_CLASS_NAME : convertClassName(classNameBytes);
                 int className = symbols.index(classNameString);
                 int methodName = symbols.index("");
                 byte type = ((AllocationSample)execution).tlabSize == 0 ? (byte) 3 : (byte) 2;
+                stackTrace[originalTrace.methods.length] = methodIndex.index(new Method(className, methodName, 0, type, false));
+            } else if (execution instanceof ContendedLock) {
+                ClassRef classRef = classRefs.getOrDefault(execution.extra(), UNKNOWN_CLASS_REF);
+                byte[] classNameBytes = this.symbols.get(classRef.name);
+                String classNameString = classNameBytes == null ? UNKNOWN_CLASS_NAME : convertClassName(classNameBytes);
+                int className = symbols.index(classNameString);
+                int methodName = symbols.index("");
+                byte type = 5;
                 stackTrace[originalTrace.methods.length] = methodIndex.index(new Method(className, methodName, 0, type, false));
             }
 
@@ -502,6 +511,12 @@ public class SimpleHeatmap extends ResourceProcessor {
             }
         }
 
+        int total = 0;
+        for (LzNode allNode : allNodes) {
+            histogram.add(allNode.count, "bodies2 node count");
+            total += allNode.count;
+        }
+
         Collections.sort(allNodes, new Comparator<LzNode>() {
             @Override
             public int compare(LzNode o1, LzNode o2) {
@@ -509,11 +524,18 @@ public class SimpleHeatmap extends ResourceProcessor {
             }
         });
 
+        long ccc = 0;
+        int nn = 0;
         synonyms = new IndexInt();
         for (LzNode node : allNodes.subList(0, synonymsCount)) {
             synonyms.index(node.id);
             out.writeVar(node.id);
+            ccc += node.count;
+            System.out.println((++nn) + " " + node.count + " " + (100L * node.count / total) + "% @" + (100L * ccc / total) + "%");
         }
+
+        int[] deltas = new int[16];
+        int p = 0;
 
         Collection<LzNode> chunks = new LinkedHashSet<>();
         int chunksCount = 0;
@@ -531,6 +553,13 @@ public class SimpleHeatmap extends ResourceProcessor {
                     chunksCount++;
 
                     chunks.add(lzNode);
+
+                    if (index >= 0 && index < deltas.length) {
+                        int a = p - deltas[index];
+                        histogram.add(a, "diff pos " + Integer.toHexString(index));
+                        deltas[index] = p;
+                    }
+                    p++;
                 }
             }
         }
@@ -843,11 +872,16 @@ public class SimpleHeatmap extends ResourceProcessor {
                     }
                 }
                 System.out.println("Histogram " + name + ": ");
+                int nowCount = 0;
                 for (int i = 1; i < count; i++) {
-                    System.out.printf("%4d: %d (%.3f)\n", i - 1, histogram[i], histogram[i]/(double)histogram[COUNT]);
+                    int c = histogram[i];
+                    nowCount += c;
+                    System.out.printf("%4d: %d (%.3f) [%.3f]\n", i - 1, c, c/(double)histogram[COUNT], nowCount/(double)histogram[COUNT]);
                 }
                 if (histogram[0] != 0) {
-                    System.out.printf(">%d: %d (%.3f)\n", COUNT - 1, histogram[0], histogram[0] / (double) histogram[COUNT]);
+                    int c = histogram[0];
+                    nowCount += c;
+                    System.out.printf(">%3d: %d (%.3f) [%.3f]\n", COUNT - 1, c, c/(double)histogram[COUNT], nowCount/(double)histogram[COUNT]);
                 }
                 System.out.println();
             }

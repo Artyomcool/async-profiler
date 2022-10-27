@@ -703,12 +703,15 @@
         const lz78Parents = new Uint32Array(buffer, uniqueChunksCount * 8 + lz78RecordsCount * 8, lz78RecordsCount);    // FIXME NOTE!!! parents in most cases takes only 3 by
         const lz78Sizes = new Uint16Array(buffer, uniqueChunksCount * 8 + lz78RecordsCount * 12, lz78RecordsCount);
 
-        const returnBuffer = new ArrayBuffer(4 * samplesCount + 4 * chunksCount + 8 * storageSize + 4 * blocksCount);
+        const returnBuffer = new ArrayBuffer(4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 8 * zoomToGroupSize.length);
         const sampleToChunkEnds = new Uint32Array(returnBuffer, 0, samplesCount);  // FIXME NOTE!!! parents in most cases takes only 3 bytes!
         const chunksToStorage = new Uint32Array(returnBuffer, 4 * samplesCount, chunksCount);  // FIXME NOTE!!! parents in most cases takes only 3 bytes!
         const storage = new Uint32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount, storageSize);   // FIXME NOTE!!! methods in most cases takes only 2 bytes!
         const storageSizes = new Uint32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 4 * storageSize, storageSize);   // FIXME NOTE!!! methods in most cases takes only 2 bytes!
         const counts = new Int32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 8 * storageSize, blocksCount);    // FIXME NOTE!!! methods in most cases takes only 1 byte!
+        const foundCounts = new Int32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 8 * storageSize + 4 * blocksCount, blocksCount);    // FIXME NOTE!!! methods in most cases takes only 1 byte!
+        const maxCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount, zoomToGroupSize.length);
+        const searchMaxCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 4 * zoomToGroupSize.length, zoomToGroupSize.length);
 
         let perf = performance.now();
         counts.fill(-1);
@@ -743,13 +746,23 @@
 
         let lz78LastRecordIndex = 0;
 
-        let maxCount = 0;
         let totalCount = 0;
         for (let c = 0; c < counts.length; c++) {
             const count = Math.max(0, counts[c]);
-            maxCount = Math.max(maxCount, count);
             totalCount += count;
             counts[c] = totalCount;
+        }
+
+        for (let zi = 0; zi < zoomToGroupSize.length; zi++) {
+            const z = zoomToGroupSize[zi];
+            let max = 0;
+            let prev = 0;
+            for (let i = 0; i < counts.length; i += z) {
+                const f = counts[i];
+                max = Math.max(max, f - prev);
+                prev = f;
+            }
+            maxCounts[zi] = Math.max(max, counts[counts.length - 1] - prev);
         }
 
         for (let i = 0; i < lz78RecordsCount - 1; i++) {
@@ -861,7 +874,9 @@
             storage: storage,
             storageSizes: storageSizes,
             counts: counts,
-            maxCount: maxCount
+            foundCounts: foundCounts,
+            maxCounts: maxCounts,
+            searchMaxCounts: searchMaxCounts
         };
     }
 
@@ -905,8 +920,8 @@
             this.timeSquareRowsCount = zoomToHeight[z];
         }
 
-        max() {
-            return this.blocksData.maxCount * this.timeSquareScale;
+        max(search) {
+            return search ? this.blocksData.searchMaxCounts[this.zoom] : this.blocksData.maxCounts[this.zoom];
         }
 
     }
@@ -971,9 +986,6 @@
     let heatC;
     let prevDx = -1000000000;
 
-    let searchExecutedCount = 0;
-    let searchMax = 0;
-
     const timeOptions = {
         year: '2-digit',
         month: '2-digit',
@@ -999,6 +1011,13 @@
         hourCycle: 'h23',
         //hour12: false
     };
+
+    function getCount(counts, i) {
+        if (i < 0 || counts.length === 0) {
+            return 0;
+        }
+        return counts[Math.min(i, counts.length - 1)];
+    }
 
     function methodInfo(methodIndex, out) {
         if (methodIndex === -1) {
@@ -1039,7 +1058,7 @@
             return out.methodName + locationSuffix;
         }
 
-        return out.className + "." + out.methodName + locationSuffix + "#" + methodIndex;
+        return out.className + "." + out.methodName + locationSuffix;
     }
 
     let bgInterval = null;
@@ -1163,8 +1182,8 @@
         const storageSizes = currentHeatmap.blocksData.storageSizes;
         const counts = currentHeatmap.blocksData.counts;
 
-        const countBeforeFirstBlock = from > 0 ? (counts[from - 1] || counts[counts.length - 1]) : 0;
-        const countAtLastBlock = to >= 0 ? (counts[to] || counts[counts.length - 1]) : 0;
+        const countBeforeFirstBlock = getCount(counts, from - 1);
+        const countAtLastBlock = getCount(counts, to);
         const count = countAtLastBlock - countBeforeFirstBlock;
 
         const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
@@ -1481,12 +1500,12 @@
         const storageSizes = currentHeatmap.blocksData.storageSizes;
         const counts = currentHeatmap.blocksData.counts;
 
-        const countBeforeFirstBlock = from > 0 ? (counts[from - 1] || counts[counts.length - 1]) : 0;
-        const countAtLastBlock = to >= 0 ? (counts[to] || counts[counts.length - 1]) : 0;
+        const countBeforeFirstBlock = getCount(counts, from - 1);
+        const countAtLastBlock = getCount(counts, to);
         const count = countAtLastBlock - countBeforeFirstBlock;
 
-        const baseCountBeforeFirstBlock = baseFrom > 0 ? (counts[baseFrom - 1] || counts[counts.length - 1]) : 0
-        const baseCountAtLastBlock = baseTo >= 0 ? (counts[baseTo] || counts[counts.length - 1]) : 0
+        const baseCountBeforeFirstBlock = getCount(counts, baseFrom - 1);
+        const baseCountAtLastBlock = getCount(counts, baseTo);
         const baseCount = baseCountAtLastBlock - baseCountBeforeFirstBlock;
 
         const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
@@ -2032,11 +2051,11 @@
         const patternDraw = !!pattern;
         const startBlock = currentHeatmap.startBlock();
 
-        const max = currentHeatmap.max();   // fixme
-        const counts = currentHeatmap.blocksData.counts;
         const scale = currentHeatmap.timeSquareScale;
+        const max = currentHeatmap.max(patternDraw);
+        const counts = patternDraw ? currentHeatmap.blocksData.foundCounts : currentHeatmap.blocksData.counts;
 
-        for (let index = from; index <= to; index++) {
+        for (let index = from; index <= to; index += scale) {
             let color;
             const i = index - startBlock;
             const firstCountsIndex = i * scale;
@@ -2044,16 +2063,13 @@
             if (afterLastCountsIndex <= 0 || firstCountsIndex >= counts.length) {
                 color = '#ddd';
             } else {
-                const countBeforeFirstBlock = counts[firstCountsIndex - 1] || 0;
-                const countAtLastBlock = counts[afterLastCountsIndex - 1] || counts[counts.length - 1];
+                const countBeforeFirstBlock = getCount(counts, firstCountsIndex - 1);
+                const countAtLastBlock = getCount(counts, afterLastCountsIndex - 1);
                 const count = countAtLastBlock - countBeforeFirstBlock;
 
-                let useFound = patternDraw && searchExecutedCount >= afterLastCountsIndex;  // todo incapsulate search
-                let maxValue = useFound ? searchMax : max;  // todo incapsulate search
-                let value = useFound ? found[i] : count;  // todo incapsulate search
-                let ratio = value / (maxValue || 1);
+                let ratio = count / max;
 
-                if (useFound) {
+                if (patternDraw) {
                     if (ratio < 0.8) {
                         let value = Math.round(255 - ratio * 255 / 0.8);
                         color = 'rgb(' + value + ',' + value + ',255)';
@@ -2134,14 +2150,6 @@
     }
 
     function fillCanvasWithEvents(zoom) {
-        searchExecutedCount = 0;
-        searchMax = 0;
-
-        // stop search
-        addTask('search', function () {
-            return false;
-        }, function () {});
-
         currentHeatmap.setZoom(zoom);
 
         const m = devicePixelRatio || 1;
@@ -2177,14 +2185,10 @@
         redrawHeatMap();
     }
 
-    let found = new Uint32Array(0);
-
     function searchIterative(r) {
         if (r && (r = prompt('Enter regexp to search:', '')) === null) {
             return;
         }
-        searchExecutedCount = 0;
-        searchMax = 0;
         if (!r) {
             pattern = undefined;
             redrawHeatMap();
@@ -2205,35 +2209,52 @@
         const storageSizes = currentHeatmap.blocksData.storageSizes;
         const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
         const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
+        const found = currentHeatmap.blocksData.foundCounts;
+        const maxCounts = currentHeatmap.blocksData.searchMaxCounts;
+
         const marks = new Uint8Array(storage.length);
-        for (let storagePos = 0; storagePos < storage.length; storagePos++) {
+        for (let storagePos = storage.length - 1; storagePos >= 0;) {
             if (matchedMethods.has(storage[storagePos])) {
-                do {
-                    marks[storagePos] = 1;
-                } while (storageSizes[storagePos] !== 1 && ++storagePos < storage.length);
+                marks[storagePos--] = 1;
+                while (storagePos >= 0 && storageSizes[storagePos] !== 1) {
+                    marks[storagePos--] = 1;
+                }
+            } else {
+                storagePos--;
             }
         }
 
-        found = new Uint32Array(counts.length);
         let s = 0;
         let p = 0;
+        let count = 0;
         for (let c = 0; c < counts.length; c++) {
-            for (; s < counts[c]; s++) {
-                for (; p < sampleToChunkEnds[s]; p++) {
+            const cc = counts[c];
+            for (; s < cc; s++) {
+                const se = sampleToChunkEnds[s];
+                for (; p < se; p++) {
                     const storagePos = chunksToStorage[p];
                     if (marks[storagePos] > 0) {
-                        found[c]++;
+                        count++;
+                        p = se;
                         break;
                     }
                 }
             }
+            found[c] = count;
         }
 
-        searchMax = 0;
-        for (let f of found) {
-            searchMax = Math.max(searchMax, f);
+        for (let zi = 0; zi < zoomToGroupSize.length; zi++) {
+            const z = zoomToGroupSize[zi];
+            let max = 0;
+            let prev = 0;
+            for (let i = 0; i < found.length; i += z) {
+                const f = found[i];
+                max = Math.max(max, f - prev);
+                prev = f;
+            }
+            maxCounts[zi] = Math.max(max, found[found.length - 1] - prev);
         }
-        searchExecutedCount = counts.length;
+
         redrawHeatMap();
 
         const matched = render(root, rootLevel);
@@ -2269,7 +2290,7 @@
         let dxPx = dx / sqScale;
         heatCanvas.style.transform = 'translate(' + dxPx + 'px, 0px)';
         let delta = Math.abs(dx - prevDx);
-        if (delta >= heatCanvas.width || searchExecutedCount !== 0) {
+        if (delta >= heatCanvas.width) {
             redrawHeatMap();
         } else {
             heatC.drawImage(heatCanvas, prevDx - dx, 0);
@@ -2380,23 +2401,27 @@
 
         const index = (sample - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale;
         const counts = currentHeatmap.blocksData.counts;
+        const foundCounts = currentHeatmap.blocksData.foundCounts;
         if (index >= 0 && index < counts.length) {
-            const countBeforeFirstBlock = counts[index - 1] || 0;
-            const countAtLastBlock = counts[index + currentHeatmap.timeSquareScale - 1] || counts[counts.length - 1];
+            const countBeforeFirstBlock = getCount(counts, index - 1);
+            const countAtLastBlock = getCount(counts, index + currentHeatmap.timeSquareScale - 1);
+            const searchCountBeforeFirstBlock = getCount(foundCounts, index - 1);
+            const searchCountAtLastBlock = getCount(foundCounts, index + currentHeatmap.timeSquareScale - 1);
 
-            const ms = startMs + currentHeatmap.currentTimeSquareMs() * index;
             const total = countAtLastBlock - countBeforeFirstBlock;
-            const max = currentHeatmap.max();   // fixme
-            heatCanvas.title = new Date(ms).toLocaleTimeString(undefined, timeOptionsShort) + " " + index;  // FIXME
+            const searchTotal = searchCountAtLastBlock - searchCountBeforeFirstBlock;
+            const max = currentHeatmap.max(false);
             const totalText = "total: " + total + " (" + Math.floor(total / max * 100) + "%)";
-            const searchText = searchExecutedCount > index
-                ? "; match: " + found[index] + " (" + Math.floor(found[index] / Math.max(total, 1) * 100) + "%)"
+            const searchText = !!pattern
+                ? "; match: " + searchTotal + " (" + Math.floor(searchTotal / Math.max(currentHeatmap.max(true), 1) * 100) + "%)"
                 : "";
             status.textContent = totalText + searchText;
             status.style.display = 'inline';
         } else {
             status.style.display = 'none';
         }
+        const ms = Math.floor(startMs / currentHeatmap.currentTimeSquareMs()) * currentHeatmap.currentTimeSquareMs() + currentHeatmap.minimalTimeSquare * index;
+        heatCanvas.title = new Date(ms).toLocaleTimeString(undefined, timeOptionsShort);
     }
 
     function callActiveRedraw(sample, shiftPressed, ctrlPressed) {
