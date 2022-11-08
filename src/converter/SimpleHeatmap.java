@@ -142,7 +142,6 @@ public class SimpleHeatmap extends ResourceProcessor {
 
                 String classNameString = classNameBytes == null ? UNKNOWN_CLASS_NAME : convertClassName(classNameBytes);
                 String methodNameString = methodNameBytes == null ? UNKNOWN_METHOD_NAME : new String(methodNameBytes);
-                //System.out.println(classNameString + ":" + methodNameString);
 
                 int className = symbols.index(classNameString);
                 int methodName = symbols.index(methodNameString);
@@ -524,18 +523,11 @@ public class SimpleHeatmap extends ResourceProcessor {
             }
         });
 
-        long ccc = 0;
-        int nn = 0;
         synonyms = new IndexInt();
         for (LzNode node : allNodes.subList(0, synonymsCount)) {
             synonyms.index(node.id);
             out.writeVar(node.id);
-            ccc += node.count;
-            System.out.println((++nn) + " " + node.count + " " + (100L * node.count / total) + "% @" + (100L * ccc / total) + "%");
         }
-
-        int[] deltas = new int[16];
-        int p = 0;
 
         Collection<LzNode> chunks = new LinkedHashSet<>();
         int chunksCount = 0;
@@ -553,13 +545,6 @@ public class SimpleHeatmap extends ResourceProcessor {
                     chunksCount++;
 
                     chunks.add(lzNode);
-
-                    if (index >= 0 && index < deltas.length) {
-                        int a = p - deltas[index];
-                        histogram.add(a, "diff pos " + Integer.toHexString(index));
-                        deltas[index] = p;
-                    }
-                    p++;
                 }
             }
         }

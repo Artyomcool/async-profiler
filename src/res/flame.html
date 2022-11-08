@@ -248,7 +248,33 @@
     // Copyright 2020 Andrei Pangin
     // Licensed under the Apache License, Version 2.0.
     'use strict';
-    performance.mark('beforeScript');
+
+    let dR, dG, dB;
+    function setH(H) {
+        const dX = 1 - Math.abs(H % 2 - 1);
+        switch (H | 0) {
+            case 0:
+                dR = 1; dG = dX; dB = 0;
+                break;
+            case 1:
+                dR = dX; dG = 1; dB = 0;
+                break;
+            case 2:
+                dR = 0; dG = 1; dB = dX;
+                break;
+            case 3:
+                dR = 0; dG = dX; dB = 1;
+                break;
+            case 4:
+                dR = dX; dG = 0; dB = 1;
+                break;
+            case 5:
+                dR = 1; dG = 0; dB = dX;
+                break;
+        }
+    }
+    setH(0.4);
+
     let root, rootLevel, px, pattern;
     let reverse = /*reverse:*/false;
     const levels = Array(/*depth:*/0);
@@ -1353,7 +1379,7 @@
                     continue;
                 }
 
-                const chunkPos = sampleToChunkPos[sampleIndex]
+                const chunkPos = sampleToChunkPos[sampleIndex];
                 const storageStartPos = chunksToStorage[chunkPos];
 
                 const storagePos = storageStartPos + storageDelta - 1;
@@ -2065,27 +2091,26 @@
                 const countBeforeFirstBlock = getCount(counts, firstCountsIndex - 1);
                 const countAtLastBlock = getCount(counts, afterLastCountsIndex - 1);
                 const count = countAtLastBlock - countBeforeFirstBlock;
-
-                let ratio = count / max;
-
-                if (patternDraw) {
-                    if (ratio < 0.8) {
-                        let value = Math.round(255 - ratio * 255 / 0.8);
-                        color = 'rgb(' + value + ',' + value + ',255)';
-                    } else {
-                        let value = Math.round(255 - (ratio - 0.8) * 100 / 0.2);
-                        color = 'rgb(0,0,' + value + ')';
-                    }
+                if (count === 0) {
+                    color = '#fff';
                 } else {
-                    if (ratio < 0.8) {
-                        let value = Math.round(255 - ratio * 255 / 0.8);
-                        color = 'rgb(255,' + value + ',' + value + ')';
+                    let ratio = count / max;
+
+                    if (patternDraw) {
+                        if (ratio < 0.8) {
+                            let value = Math.round(255 - ratio * 255 / 0.8);
+                            color = 'rgb(' + value + ',' + value + ',255)';
+                        } else {
+                            let value = Math.round(255 - (ratio - 0.8) * 100 / 0.2);
+                            color = 'rgb(0,0,' + value + ')';
+                        }
                     } else {
-                        let value = Math.round(255 - (ratio - 0.8) * 100 / 0.2);
-                        color = 'rgb(' + value + ',0,0)';
+                        ratio = 0.7 * ratio + 0.1;
+                        const C = 1 - Math.abs(1 - 2 * ratio);
+                        const m = (1 - ratio) - C / 2;
+                        color = 'rgb(' + (dR * C + m) * 255 + ',' + (dG * C + m) * 255 + ',' + (dB * C + m) * 255 + ')';
                     }
                 }
-
             }
             heatC.fillStyle = color;
 
