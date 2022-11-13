@@ -306,7 +306,7 @@
         [0xe15a5a, 30, 40, 40],
         [0xc8c83c, 30, 30, 10],
         [0xe17d00, 30, 30, 0],
-        [0xcce880, 20, 20, 20],
+        [0xcce880, 20, 20, 20]
     ];
 
     function getColor(p) {
@@ -671,6 +671,10 @@
             return c;
         }
 
+        nextInt18() {
+            return this.nextInt6() | this.nextInt6() << 6 | this.nextInt6() << 12;
+        }
+
         int36(pos) {
             let p = pos * 6;
             if (p < 0) {
@@ -959,13 +963,51 @@
         return r;
     }
 
+    function methodName(className, methodName, bci, line, type) {
+        const locationSuffix = line === 0 ? (bci === 0 ? "" : ("@" + bci)) : (":" + line);
+
+        if (methodName === '') {
+            return className + locationSuffix;
+        }
+        if (className === '') {
+            return methodName + locationSuffix;
+        }
+        if (type >= 3 && type <= 5) {
+            return methodName + locationSuffix;
+        }
+
+        return className + "." + methodName + locationSuffix;
+    }
+
+    function readMethods(data) {
+        const count = (data.data.length - 2) / 13;
+        const names = [];
+        const colors = [];
+
+        names.push(methodName("all", "", 0, 0, 3));
+        colors.push(getColor(palette[3]));
+
+        data.nextInt6();
+        for (let i = 0; i < count; i++) {
+            const className = data.nextInt18();
+            const name = data.nextInt18();
+            const bci = data.nextInt18();
+            const line = data.nextInt18();
+            const type = data.nextInt6();
+
+            names.push(methodName(cpool[className - 1], cpool[name - 1], bci, line, type));
+            colors.push(getColor(palette[type]));
+        }
+
+        return {n: names, c: colors};
+    }
+
     let sq = 5;
     let sqPx = sq;
     let sqScale = 1;
     const canvasScrollPadding = 200;
     let canvasTimeHeight = 12;
     let canvasTimeHeightPx = 12;
-    let ticksPerSecond = /*ticksPerSecond:*/1;  // TODO put into data
     let startMs = /*startMs:*/0;    // TODO put into data
 
     const zoomToGroupSize = [
@@ -985,9 +1027,9 @@
         ' 1 hr  : 1 min '
     ];
 
-    let methods = new DataBuffer(claimHtml("methods"));
-    let executionsHeatmap = new HeatmapCollection(claimHtml("executionsHeatmap"));
-    let cpool = [/*cpool:*/];
+    const executionsHeatmap = new HeatmapCollection(claimHtml("executionsHeatmap"));
+    const cpool = [/*cpool:*/];
+    const methods = readMethods(new DataBuffer(claimHtml("methods")));
 
     let currentHeatmap = executionsHeatmap;
     let currentHeatmapType = 'executions';
@@ -1043,48 +1085,6 @@
             return 0;
         }
         return counts[Math.min(i, counts.length - 1)];
-    }
-
-    function methodInfo(methodIndex, out) {
-        if (methodIndex === -1) {
-            out.className = '';
-            out.methodName = 'all';
-            out.location = 0;
-            out.type = 3;
-            return;
-        }
-
-        methodIndex--;
-
-        // FIXME wrong sizes, use int18
-        let methodAndClass = methods.int36(methodIndex * 2);
-        let locationAndType = methods.int36(methodIndex * 2 + 1)
-        let className = (methodAndClass & 0x3FFFF) - 1;
-        let methodName = (methodAndClass >>> 18) - 1;
-
-        out.className = cpool[className];
-        out.methodName = cpool[methodName];
-        // fixme use 16 bits for location parts + 2 for type on both sides, after that, use int18
-        out.location = locationAndType >>> 4;
-        out.type = locationAndType & 15;
-    }
-
-    function title(methodIndex, out) {
-        methodInfo(methodIndex, out);
-        const codeLine = (out.location & 0xffff);
-        let locationSuffix = codeLine === 0 ? "" : (":" + codeLine);
-
-        if (out.methodName === '') {
-            return out.className + locationSuffix;
-        }
-        if (out.className === '') {
-            return out.methodName + locationSuffix;
-        }
-        if (out.type >= 3 && out.type <= 5) {
-            return out.methodName + locationSuffix;
-        }
-
-        return out.className + "." + out.methodName + locationSuffix;
     }
 
     let bgInterval = null;
@@ -1922,16 +1922,15 @@
             let [framesBuffer, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer] = prepareFrames(from, to);
             let nextFramesBuffer = new Uint32Array(100050000);    // FIXME
             const methodsBuffers = [
-                new Uint32Array(methods.data.length + 1),
-                new Uint32Array(methods.data.length + 1),
-                new Uint32Array(methods.data.length + 1),
-                new Uint32Array(methods.data.length + 1)
+                new Uint32Array(methods.c.length + 1),
+                new Uint32Array(methods.c.length + 1),
+                new Uint32Array(methods.c.length + 1),
+                new Uint32Array(methods.c.length + 1)
             ];  // FIXME prealloc, use one buffer
 
             levels.length = 0;
 
             let levelToRedraw = 0;
-            let methodInfoOut = {};
 
             let pp = 0;
 
@@ -1941,9 +1940,7 @@
                     pp += performance.now() - p;
                     if (roots.length === 0) {
                         if (levels.length === 0) {
-                            const t = title(0, methodInfoOut);
-                            let color = getColor(palette[methodInfoOut.type]);
-                            levels.push([{left: 0, width: 0, color: color, title: t}]);
+                            levels.push([{left: 0, width: 0, color: methods.c[0], title: methods.n[0]}]);
                         }
                         renderWithMatch(levels.length * 16, levels[0][0], 0);
                         console.log("ALL PERF", pp);    //3911.299999922514 763.5999992787838 2337.800000876188
@@ -1953,13 +1950,11 @@
                     let level = new Array(roots.length);
                     let i = 0;
                     for (let root of roots) {
-                        const t = title(root.m, methodInfoOut);
-                        let color = getColor(palette[methodInfoOut.type]);
                         level[i++] = {
                             left: root.x,
                             width: root.c,
-                            color: color,
-                            title: t
+                            color: methods.c[root.m],
+                            title: methods.n[root.m]
                         };
                     }
 
@@ -2007,12 +2002,12 @@
         let [framesBuffer, sampleToChunkPos, sampleToStorageDelta] = prepareFramesDiff(from, to, baseFrom, baseTo);
         let nextFramesBuffer = new Uint32Array(100050000);    // FIXME
         const methodsBuffers = [
-            new Uint32Array(methods.data.length + 1),
-            new Uint32Array(methods.data.length + 1),
-            new Uint32Array(methods.data.length + 1),
-            new Uint32Array(methods.data.length + 1),
-            new Uint32Array(methods.data.length + 1),
-            new Uint32Array(methods.data.length + 1)
+            new Uint32Array(methods.c.length + 1),
+            new Uint32Array(methods.c.length + 1),
+            new Uint32Array(methods.c.length + 1),
+            new Uint32Array(methods.c.length + 1),
+            new Uint32Array(methods.c.length + 1),
+            new Uint32Array(methods.c.length + 1)
         ];  // FIXME prealloc, use one buffer
 
         levels.length = 0;
@@ -2041,7 +2036,6 @@
                 let level = new Array(roots.length);
                 let i = 0;
                 for (let root of roots) {
-                    const t = title(root.m, methodInfoOut) + " (" + root.c + "/" + root.b + ")";
                     let color;
                     if (root.b === 0) {
                         color = "#dac571";
@@ -2056,7 +2050,7 @@
                         left: root.x,
                         width: root.c,
                         color: color,
-                        title: t
+                        title: methods.n[root.m] + " (" + root.c + "/" + root.b + ")"
                     };
                 }
 
@@ -2222,9 +2216,8 @@
 
         pattern = r ? RegExp(r) : undefined;
         const matchedMethods = new Set();
-        const methodOut = {};
-        for (let index = methods.data.length / 12; index >= 0; index--) {
-            if (pattern.test(title(index, methodOut))) {
+        for (let index = methods.c.length - 1; index >= 0; index--) {
+            if (pattern.test(methods.n[index])) {
                 matchedMethods.add(index);
             }
         }

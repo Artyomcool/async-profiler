@@ -18,10 +18,26 @@ public class SimpleHeatmap extends ResourceProcessor {
     private static final MethodRef UNKNOWN_METHOD_REF = new MethodRef(UNKNOWN_ID, UNKNOWN_ID, UNKNOWN_ID);
     private static final ClassRef UNKNOWN_CLASS_REF = new ClassRef(UNKNOWN_ID);
 
-    private final List<Event> samples = new ArrayList<>();
+    private final IntList sampleList = new IntList();
+    private final LongList sampleTimeList = new LongList();
+    private final Index<String> symbolTable = new Index<>();
+    private final Index<Method> methodIndex = new Index<>();
+    private final Index<int[]> stackTracesRemap = new Index<int[]>() {
+        @Override
+        protected boolean equals(int[] k1, int[] k2) {
+            return Arrays.equals(k1, k2);
+        }
+
+        @Override
+        protected int hashCode(int[] key) {
+            return Arrays.hashCode(key) * 0x5bd1e995;
+        }
+    };
 
     private final String title;
     private final boolean alloc;
+
+    private final DictionaryInt stackTracesCache = new DictionaryInt();
 
     private Dictionary<StackTrace> stacks;
     private Dictionary<MethodRef> methodRefs;
@@ -29,157 +45,131 @@ public class SimpleHeatmap extends ResourceProcessor {
     private Dictionary<byte[]> symbols;
 
     private long startMs;
-    private long startTicks;
-    private long ticksPerSec;
 
     public SimpleHeatmap(String title, boolean alloc) {
         this.title = title;
         this.alloc = alloc;
+
+        Method rootMethod = new Method(symbolTable.index("all"), symbolTable.index(""));
+        methodIndex.index(rootMethod);
     }
 
-    public void addEvent(Event event) {
-        if (alloc) {
-            if (event instanceof AllocationSample) {
-                samples.add(event);
-            }
-        } else {
-            if (event instanceof ExecutionSample) {
-                samples.add(event);
-            }
-        }
-    }
-
-    public void finish(
+    public void nextFile(
             Dictionary<StackTrace> stacks,
             Dictionary<MethodRef> methodRefs,
             Dictionary<ClassRef> classRefs,
-            Dictionary<byte[]> symbols,
-            long startMs,
-            long startTicks,
-            long ticksPerSec
+            Dictionary<byte[]> symbols
     ) {
         this.stacks = stacks;
         this.methodRefs = methodRefs;
         this.classRefs = classRefs;
         this.symbols = symbols;
-        this.startMs = startMs;
-        this.startTicks = startTicks;
-        this.ticksPerSec = ticksPerSec;
+
+        stackTracesCache.clear();
     }
 
-    private long ms(long ticks) {
-        return (ticks - startTicks) * 1000 / ticksPerSec;
+    public void addEvent(Event event, long timeMs) {
+        if (alloc) {
+            if (event instanceof AllocationSample) {
+                addSample(event, timeMs);
+            }
+        } else {
+            if (event instanceof ExecutionSample) {
+                addSample(event, timeMs);
+            }
+        }
+    }
+
+    public void finish(long startMs) {
+        this.startMs = startMs;
+    }
+
+    private void addSample(Event event, long timeMs) {
+        int stackTraceId = stackTracesCache.get((long)event.extra() << 32 | event.stackTraceId, -1);
+
+        if (stackTraceId != -1) {
+            sampleList.add(stackTraceId);
+            sampleTimeList.add(timeMs);
+            return;
+        }
+
+        StackTrace originalTrace = stacks.getOrDefault(event.stackTraceId, UNKNOWN_STACK);
+        int[] stackTrace = new int[originalTrace.methods.length +
+                ((event instanceof AllocationSample || event instanceof ContendedLock) ? 1 : 0)];
+
+        for (int i = originalTrace.methods.length - 1; i >= 0; i--) {
+            long methodId = originalTrace.methods[i];
+            byte type = originalTrace.types[i];
+            int location = originalTrace.locations[i];
+
+            MethodRef methodRef = methodRefs.getOrDefault(methodId, UNKNOWN_METHOD_REF);
+            ClassRef classRef = classRefs.getOrDefault(methodRef.cls, UNKNOWN_CLASS_REF);
+
+            byte[] classNameBytes = this.symbols.get(classRef.name);
+            byte[] methodNameBytes = this.symbols.get(methodRef.name);
+
+            String classNameString = classNameBytes == null ? UNKNOWN_CLASS_NAME : convertClassName(classNameBytes);
+            String methodNameString = methodNameBytes == null ? UNKNOWN_METHOD_NAME : new String(methodNameBytes);
+
+            int className = symbolTable.index(classNameString);
+            int methodName = symbolTable.index(methodNameString);
+
+            int index = originalTrace.methods.length - 1 - i;
+            Method method = new Method(className, methodName, location, type, index == 0);
+            stackTrace[index] = methodIndex.index(method);
+        }
+
+        if (event instanceof AllocationSample) {
+            ClassRef classRef = classRefs.getOrDefault(event.extra(), UNKNOWN_CLASS_REF);
+            byte[] classNameBytes = this.symbols.get(classRef.name);
+            String classNameString = classNameBytes == null ? UNKNOWN_CLASS_NAME : convertClassName(classNameBytes);
+            int className = symbolTable.index(classNameString);
+            int methodName = symbolTable.index("");
+            byte type = ((AllocationSample)event).tlabSize == 0 ? (byte) 3 : (byte) 2;
+            stackTrace[originalTrace.methods.length] = methodIndex.index(new Method(className, methodName, 0, type, false));
+        } else if (event instanceof ContendedLock) {
+            ClassRef classRef = classRefs.getOrDefault(event.extra(), UNKNOWN_CLASS_REF);
+            byte[] classNameBytes = this.symbols.get(classRef.name);
+            String classNameString = classNameBytes == null ? UNKNOWN_CLASS_NAME : convertClassName(classNameBytes);
+            int className = symbolTable.index(classNameString);
+            int methodName = symbolTable.index("");
+            byte type = 5;
+            stackTrace[originalTrace.methods.length] = methodIndex.index(new Method(className, methodName, 0, type, false));
+        }
+
+        stackTraceId = stackTracesRemap.index(stackTrace);
+        stackTracesCache.put((long)event.extra() << 32 | event.stackTraceId, stackTraceId);
+
+        sampleList.add(stackTraceId);
+        sampleTimeList.add(timeMs);
     }
 
     private EvaluationContext evaluate(long blockDurationMs) {
-        System.out.println("Evaluation started");
-        Collections.sort(samples);
+        for (int i = 0; i < sampleTimeList.size; i++) {
+            long time = sampleTimeList.list[i];
+            sampleTimeList.list[i] = (time - startMs) << 32 | sampleList.list[i];
+        }
+        Arrays.sort(sampleTimeList.list, 0, sampleTimeList.size);
 
-        final Index<String> symbols = new Index<>();
-        symbols.preallocate(this.symbols.size());
-        Method rootMethod = new Method(symbols.index("all"), symbols.index(""));
-
-        final Index<Method> methodIndex = new Index<>();
-
-        methodIndex.index(rootMethod);
-
-        Dictionary<int[]> stackTraces = new Dictionary<>();
-
-        long durationExecutions = samples.isEmpty() ? 0 : ms(samples.get(samples.size() - 1).time);
+        long durationExecutions = sampleTimeList.size == 0 ? 0 : (sampleTimeList.list[sampleTimeList.size - 1] >>> 32);
         SampleBlock[] blocks = new SampleBlock[(int) (durationExecutions / blockDurationMs) + 1];
         for (int i = 0; i < blocks.length; i++) {
             blocks[i] = new SampleBlock();
         }
 
-        Index<int[]> stackTracesRemap = new Index<int[]>() {
-            @Override
-            protected boolean equals(int[] k1, int[] k2) {
-                return Arrays.equals(k1, k2);
-            }
-
-            @Override
-            protected int hashCode(int[] key) {
-                return Arrays.hashCode(key) * 0x5bd1e995;
-            }
-        };
-
-        long procent = 0;
-        long pp = 0;
-
-        for (Event execution : samples) {
-            if (pp * 100 / samples.size() != procent) {
-                procent = pp * 100 / samples.size();
-                System.out.print("Processing samples: " + procent + "%     \r");
-            }
-            pp++;
-            if (pp > 1) {
-                //break;
-            }
-
-            long timeMs = ms(execution.time);
+        for (int i = 0; i < sampleTimeList.size; i++) {
+            int stackTraceId = (int) (sampleTimeList.list[i] & 0xFFFFFFFFL);
+            int timeMs = (int) (sampleTimeList.list[i] >>> 32);
             SampleBlock block = blocks[(int) (timeMs / blockDurationMs)];
 
-            int[] stackTrace = stackTraces.get((long)execution.extra() << 32 | execution.stackTraceId);
-
-            if (stackTrace != null) {
-                block.stacks.add(stackTracesRemap.index(stackTrace));
-                continue;
-            }
-
-            StackTrace originalTrace = stacks.getOrDefault(execution.stackTraceId, UNKNOWN_STACK);
-            stackTrace = new int[originalTrace.methods.length + ((execution instanceof AllocationSample || execution instanceof ContendedLock) ? 1 : 0)];
-
-            for (int i = originalTrace.methods.length - 1; i >= 0; i--) {
-                long methodId = originalTrace.methods[i];
-                byte type = originalTrace.types[i];
-                int location = originalTrace.locations[i];
-
-                MethodRef methodRef = methodRefs.getOrDefault(methodId, UNKNOWN_METHOD_REF);
-                ClassRef classRef = classRefs.getOrDefault(methodRef.cls, UNKNOWN_CLASS_REF);
-
-                byte[] classNameBytes = this.symbols.get(classRef.name);
-                byte[] methodNameBytes = this.symbols.get(methodRef.name);
-
-                String classNameString = classNameBytes == null ? UNKNOWN_CLASS_NAME : convertClassName(classNameBytes);
-                String methodNameString = methodNameBytes == null ? UNKNOWN_METHOD_NAME : new String(methodNameBytes);
-
-                int className = symbols.index(classNameString);
-                int methodName = symbols.index(methodNameString);
-
-                int index = originalTrace.methods.length - 1 - i;
-                Method method = new Method(className, methodName, location, type, index == 0);
-                stackTrace[index] = methodIndex.index(method);
-            }
-            if (execution instanceof AllocationSample) {
-                ClassRef classRef = classRefs.getOrDefault(execution.extra(), UNKNOWN_CLASS_REF);
-                byte[] classNameBytes = this.symbols.get(classRef.name);
-                String classNameString = classNameBytes == null ? UNKNOWN_CLASS_NAME : convertClassName(classNameBytes);
-                int className = symbols.index(classNameString);
-                int methodName = symbols.index("");
-                byte type = ((AllocationSample)execution).tlabSize == 0 ? (byte) 3 : (byte) 2;
-                stackTrace[originalTrace.methods.length] = methodIndex.index(new Method(className, methodName, 0, type, false));
-            } else if (execution instanceof ContendedLock) {
-                ClassRef classRef = classRefs.getOrDefault(execution.extra(), UNKNOWN_CLASS_REF);
-                byte[] classNameBytes = this.symbols.get(classRef.name);
-                String classNameString = classNameBytes == null ? UNKNOWN_CLASS_NAME : convertClassName(classNameBytes);
-                int className = symbols.index(classNameString);
-                int methodName = symbols.index("");
-                byte type = 5;
-                stackTrace[originalTrace.methods.length] = methodIndex.index(new Method(className, methodName, 0, type, false));
-            }
-
-            stackTraces.put((long)execution.extra() << 32 | execution.stackTraceId, stackTrace);
-            block.stacks.add(stackTracesRemap.index(stackTrace));
+            block.stacks.add(stackTraceId);
         }
-        System.out.print("Processing samples: done     \n");
-
-        System.out.println("Unique: " + stackTracesRemap.size() + "/" + stackTraces.size());
 
         int[][] stacks = new int[stackTracesRemap.size()][];
         stackTracesRemap.orderedKeys(stacks);
 
-        String[] symbolBytes = new String[symbols.size()];
-        symbols.orderedKeys(symbolBytes);
+        String[] symbolBytes = new String[symbolTable.size()];
+        symbolTable.orderedKeys(symbolBytes);
 
         return new EvaluationContext(
                 Arrays.asList(blocks),
@@ -232,8 +222,11 @@ public class SimpleHeatmap extends ResourceProcessor {
 
     private void compressMethods(Output out, Method[] methods) {
         for (Method method : methods) {
-            out.write36((long) method.methodName << 18L | method.className);
-            out.write36((long) method.location << 4L | method.type);
+            out.write18(method.className);
+            out.write18(method.methodName);
+            out.write18(method.location & 0xffff);
+            out.write18(method.location >>> 16);
+            out.write6(method.type);
         }
     }
 
@@ -279,8 +272,6 @@ public class SimpleHeatmap extends ResourceProcessor {
         tail = skipTill(tail, "/*end if flamegraph js*/");
 
         tail = printTill(out, tail, "/*if heatmap js:*/");
-        tail = printTill(out, tail, "/*ticksPerSecond:*/1");
-        out.print(ticksPerSec);
 
         tail = printTill(out, tail, "/*startMs:*/0");
         out.print(startMs);
@@ -611,7 +602,9 @@ public class SimpleHeatmap extends ResourceProcessor {
                 return Integer.compare(o1.tmp, o2.tmp);
             }
         });
+        out.write("A");
         compressMethods(out, evaluationContext.orderedMethods);
+        out.write("A");
     }
 
     private static String printTill(Output out, String tail, String till) {
@@ -718,6 +711,8 @@ public class SimpleHeatmap extends ResourceProcessor {
 
         void write6(int v);
 
+        void write18(int v);
+
         void write36(long v);
 
         void write(String data);
@@ -782,6 +777,17 @@ public class SimpleHeatmap extends ResourceProcessor {
                 throw new IllegalArgumentException("Value " + v + " is out of bounds");
             }
             nextByte(v);
+        }
+
+        @Override
+        public void write18(int v) {
+            if ((v & (~0x3FFFF)) != 0) {
+                throw new IllegalArgumentException("Value " + v + " is out of bounds");
+            }
+            for (int i = 0; i < 3; i++) {
+                nextByte(v & 0x3F);
+                v >>>= 6;
+            }
         }
 
         @Override

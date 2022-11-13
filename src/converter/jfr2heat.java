@@ -19,7 +19,6 @@ import one.jfr.event.Event;
 
 import java.io.BufferedOutputStream;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.PrintStream;
 import java.util.concurrent.TimeUnit;
 
@@ -27,27 +26,6 @@ import java.util.concurrent.TimeUnit;
  * Converts .jfr output produced by async-profiler to HTML Heatmap.
  */
 public class jfr2heat {
-
-    private final JfrReader jfr;
-
-    public jfr2heat(JfrReader jfr) {
-        this.jfr = jfr;
-    }
-
-    public void convert(SimpleHeatmap heatmap) throws IOException {
-        for (Event event; (event = jfr.readEvent()) != null; ) {
-            heatmap.addEvent(event);
-        }
-        heatmap.finish(
-                jfr.stackTraces,
-                jfr.methods,
-                jfr.classes,
-                jfr.symbols,
-                TimeUnit.NANOSECONDS.toMillis(jfr.startNanos),
-                jfr.startTicks,
-                jfr.ticksPerSec
-        );
-    }
 
     public static void main(String[] args) throws Exception {
 
@@ -65,17 +43,36 @@ public class jfr2heat {
             }
         }
 
-        SimpleHeatmap fg = new SimpleHeatmap("Heatmap, " + (alloc ? "Alloc" : "CPU"), alloc);
-        try (JfrReader jfr = new JfrReader(input)) {
-            new jfr2heat(jfr).convert(fg);
+        long startNanos = Long.MAX_VALUE;
+
+        SimpleHeatmap heatmap = new SimpleHeatmap("Heatmap, " + (alloc ? "Alloc" : "CPU"), alloc);
+        for (String file : input.split(",")) {
+            try (JfrReader jfr = new JfrReader(file)) {
+                heatmap.nextFile(
+                        jfr.stackTraces,
+                        jfr.methods,
+                        jfr.classes,
+                        jfr.symbols
+                );
+
+                for (Event event; (event = jfr.readEvent()) != null; ) {
+                    long msFromStart = (event.time - jfr.startTicks) * 1000 / jfr.ticksPerSec;
+                    long msStart = TimeUnit.NANOSECONDS.toMillis(jfr.startNanos);
+                    heatmap.addEvent(event, msFromStart + msStart);
+                }
+
+                startNanos = Math.min(jfr.startNanos, startNanos);
+            }
         }
 
+        heatmap.finish(TimeUnit.NANOSECONDS.toMillis(startNanos));
+
         if (output == null) {
-            fg.dump(System.out);
+            heatmap.dump(System.out);
         } else {
             try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(output), 1024 * 1024);
                  PrintStream out = new PrintStream(bos, false, "UTF-8")) {
-                fg.dump(out);
+                heatmap.dump(out);
             }
         }
 
