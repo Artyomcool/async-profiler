@@ -40,7 +40,7 @@ class MachOParser {
         for (uint32_t i = 0; i < sc->nsects; i++) {
             if (strcmp(section->sectname, "__la_symbol_ptr") == 0) {
                 const char* got_start = add(_image_base, section->addr);
-                _cc->setGlobalOffsetTable((void**)got_start, (void**)(got_start + section->size));
+                _cc->setGlobalOffsetTable((void**)got_start, (void**)(got_start + section->size), true);
                 break;
             }
             section++;
@@ -50,6 +50,7 @@ class MachOParser {
     void loadSymbols(const symtab_command* symtab, const char* text_base, const char* link_base) {
         const nlist_64* sym = (const nlist_64*)add(link_base, symtab->symoff);
         const char* str_table = add(link_base, symtab->stroff);
+        bool debug_symbols = false;
 
         for (uint32_t i = 0; i < symtab->nsyms; i++) {
             if ((sym->n_type & 0xee) == 0x0e && sym->n_value != 0) {
@@ -57,9 +58,12 @@ class MachOParser {
                 const char* name = str_table + sym->n_un.n_strx;
                 if (name[0] == '_') name++;
                 _cc->add(addr, 0, name);
+                debug_symbols = true;
             }
             sym++;
         }
+
+        _cc->setDebugSymbols(debug_symbols);
     }
 
   public:
@@ -151,10 +155,6 @@ void Symbols::parseLibraries(CodeCacheArray* array, bool kernel_symbols) {
         cc->sort();
         array->add(cc);
     }
-}
-
-void Symbols::makePatchable(CodeCache* cc) {
-    // Global Offset Table is always writable
 }
 
 #endif // __APPLE__

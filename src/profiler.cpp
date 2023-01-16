@@ -74,6 +74,7 @@ enum StackRecovery {
     UNWIND_NATIVE = 0x8,
     LAST_JAVA_PC  = 0x10,
     GC_TRACES     = 0x20,
+    PROBE_SP      = 0x100,
 };
 
 
@@ -171,6 +172,9 @@ const char* Profiler::asgctError(int code) {
             return "safepoint";
         case ticks_skipped:
             return "skipped";
+        case ticks_unknown_state:
+            // Zing sometimes returns it
+            return "unknown_state";
         default:
             // Should not happen
             return "unexpected_state";
@@ -249,10 +253,10 @@ const char* Profiler::getLibraryName(const char* native_symbol) {
 }
 
 CodeCache* Profiler::findJvmLibrary(const char* lib_name) {
-    if (!VM::isOpenJ9()) {
-        return VMStructs::libjvm();
-    }
+    return VM::isOpenJ9() ? findLibraryByName(lib_name) : VMStructs::libjvm();
+}
 
+CodeCache* Profiler::findLibraryByName(const char* lib_name) {
     const size_t lib_name_len = strlen(lib_name);
     const int native_lib_count = _native_libs.count();
     for (int i = 0; i < native_lib_count; i++) {
@@ -267,7 +271,7 @@ CodeCache* Profiler::findJvmLibrary(const char* lib_name) {
     return NULL;
 }
 
-CodeCache* Profiler::findNativeLibrary(const void* address) {
+CodeCache* Profiler::findLibraryByAddress(const void* address) {
     const int native_lib_count = _native_libs.count();
     for (int i = 0; i < native_lib_count; i++) {
         if (_native_libs[i]->contains(address)) {
@@ -278,7 +282,7 @@ CodeCache* Profiler::findNativeLibrary(const void* address) {
 }
 
 const char* Profiler::findNativeMethod(const void* address) {
-    CodeCache* lib = findNativeLibrary(address);
+    CodeCache* lib = findLibraryByAddress(address);
     return lib == NULL ? NULL : lib->binarySearch(address);
 }
 
@@ -287,7 +291,7 @@ bool Profiler::isAddressInCode(uintptr_t addr) {
     if (CodeHeap::contains(pc)) {
         return CodeHeap::findNMethod(pc) != NULL && !(pc >= _call_stub_begin && pc < _call_stub_end);
     } else {
-        return findNativeLibrary(pc) != NULL;
+        return findLibraryByAddress(pc) != NULL;
     }
 }
 
@@ -399,11 +403,12 @@ int Profiler::getJavaTraceAsync(void* ucontext, ASGCT_CallFrame* frames, int max
             }
             if (!(_safe_mode & POP_STUB) && frame.popStub((instruction_t*)stub->_start, stub->_name)
                     && isAddressInCode(frame.pc() -= ADJUST_RET)) {
+                java_ctx->pc = (const void*)frame.pc();
                 VM::_asyncGetCallTrace(&trace, max_depth, ucontext);
             }
         } else if (VMStructs::hasMethodStructs()) {
             NMethod* nmethod = CodeHeap::findNMethod((const void*)frame.pc());
-            if (nmethod != NULL && nmethod->isNMethod()) {
+            if (nmethod != NULL && nmethod->isNMethod() && nmethod->isAlive()) {
                 VMMethod* method = nmethod->method();
                 if (method != NULL) {
                     jmethodID method_id = method->constMethod()->id();
@@ -413,6 +418,15 @@ int Profiler::getJavaTraceAsync(void* ucontext, ASGCT_CallFrame* frames, int max
                     if (!(_safe_mode & POP_METHOD) && frame.popMethod((instruction_t*)nmethod->entry())
                             && isAddressInCode(frame.pc() -= ADJUST_RET)) {
                         VM::_asyncGetCallTrace(&trace, max_depth, ucontext);
+                    }
+                    if ((_safe_mode & PROBE_SP) && trace.num_frames < 0) {
+                        if (method_id != NULL) {
+                            trace.frames--;
+                        }
+                        for (int i = 0; trace.num_frames < 0 && i < PROBE_SP_LIMIT; i++) {
+                            frame.sp() += sizeof(void*);
+                            VM::_asyncGetCallTrace(&trace, max_depth, ucontext);
+                        }
                     }
                 }
             } else if (nmethod != NULL) {
@@ -441,7 +455,7 @@ int Profiler::getJavaTraceAsync(void* ucontext, ASGCT_CallFrame* frames, int max
                     m->setFrameCompleteOffset(0);
                 }
                 VM::_asyncGetCallTrace(&trace, max_depth, ucontext);
-            } else if (findNativeLibrary((const void*)pc) != NULL) {
+            } else if (findLibraryByAddress((const void*)pc) != NULL) {
                 VM::_asyncGetCallTrace(&trace, max_depth, ucontext);
             }
 
@@ -523,7 +537,7 @@ inline int Profiler::convertFrames(jvmtiFrameInfo* jvmti_frames, ASGCT_CallFrame
 }
 
 void Profiler::fillFrameTypes(ASGCT_CallFrame* frames, int num_frames, NMethod* nmethod) {
-    if (nmethod->isNMethod()) {
+    if (nmethod->isNMethod() && nmethod->isAlive()) {
         VMMethod* method = nmethod->method();
         if (method == NULL) {
             return;
@@ -532,6 +546,12 @@ void Profiler::fillFrameTypes(ASGCT_CallFrame* frames, int num_frames, NMethod* 
         jmethodID current_method_id = method->constMethod()->id();
         if (current_method_id == NULL) {
             return;
+        }
+
+        // If the top frame is a runtime stub, skip it
+        if (num_frames > 0 && frames[0].bci == BCI_NATIVE_FRAME) {
+            frames++;
+            num_frames--;
         }
 
         // Mark current_method as COMPILED and frames above current_method as INLINED
@@ -559,7 +579,7 @@ void Profiler::fillFrameTypes(ASGCT_CallFrame* frames, int num_frames, NMethod* 
     }
 }
 
-void Profiler::recordSample(void* ucontext, u64 counter, jint event_type, Event* event) {
+u64 Profiler::recordSample(void* ucontext, u64 counter, jint event_type, Event* event) {
     atomicInc(_total_samples);
 
     int tid = OS::threadId();
@@ -575,7 +595,7 @@ void Profiler::recordSample(void* ucontext, u64 counter, jint event_type, Event*
             // Need to reset PerfEvents ring buffer, even though we discard the collected trace
             PerfEvents::resetBuffer(tid);
         }
-        return;
+        return 0;
     }
 
     ASGCT_CallFrame* frames = _calltrace_buffer[lock_index]->_asgct_frames;
@@ -592,19 +612,21 @@ void Profiler::recordSample(void* ucontext, u64 counter, jint event_type, Event*
     if (event_type == 0) {
         // Async events
         int java_frames = getJavaTraceAsync(ucontext, frames + num_frames, _max_stack_depth, &java_ctx);
-        if (java_frames > 0 && java_ctx.pc != NULL) {
+        if (java_frames > 0 && java_ctx.pc != NULL && VMStructs::hasMethodStructs()) {
             NMethod* nmethod = CodeHeap::findNMethod(java_ctx.pc);
             if (nmethod != NULL) {
                 fillFrameTypes(frames + num_frames, java_frames, nmethod);
             }
         }
         num_frames += java_frames;
-    } else if (event_type >= BCI_ALLOC_OUTSIDE_TLAB && VMStructs::_get_stack_trace != NULL) {
-        // Object allocation in HotSpot happens at known places where it is safe to call JVM TI,
-        // but not directly, since the thread is in_vm rather than in_native
-        num_frames += getJavaTraceInternal(jvmti_frames + num_frames, frames + num_frames, _max_stack_depth);
-    } else if (event_type >= BCI_ALLOC_OUTSIDE_TLAB && !VM::isOpenJ9()) {
-        num_frames += getJavaTraceAsync(ucontext, frames + num_frames, _max_stack_depth, &java_ctx);
+    } else if (event_type >= BCI_ALLOC_OUTSIDE_TLAB && _alloc_engine == &alloc_tracer) {
+        if (VMStructs::_get_stack_trace != NULL) {
+            // Object allocation in HotSpot happens at known places where it is safe to call JVM TI,
+            // but not directly, since the thread is in_vm rather than in_native
+            num_frames += getJavaTraceInternal(jvmti_frames + num_frames, frames + num_frames, _max_stack_depth);
+        } else {
+            num_frames += getJavaTraceAsync(ucontext, frames + num_frames, _max_stack_depth, &java_ctx);
+        }
     } else {
         // Lock events and instrumentation events can safely call synchronous JVM TI stack walker.
         // Skip Instrument.recordSample() method
@@ -624,12 +646,13 @@ void Profiler::recordSample(void* ucontext, u64 counter, jint event_type, Event*
     }
 
     u32 call_trace_id = _call_trace_storage.put(num_frames, frames, counter);
-    _jfr.recordEvent(lock_index, tid, call_trace_id, event_type, event, counter);
+    _jfr.recordEvent(lock_index, tid, call_trace_id, event_type, event);
 
     _locks[lock_index].unlock();
+    return (u64)tid << 32 | call_trace_id;
 }
 
-void Profiler::recordExternalSample(u64 counter, Event* event, int tid, int num_frames, ASGCT_CallFrame* frames) {
+void Profiler::recordExternalSample(u64 counter, int tid, jint event_type, Event* event, int num_frames, ASGCT_CallFrame* frames) {
     atomicInc(_total_samples);
 
     if (_add_thread_frame) {
@@ -651,7 +674,23 @@ void Profiler::recordExternalSample(u64 counter, Event* event, int tid, int num_
         return;
     }
 
-    _jfr.recordEvent(lock_index, tid, call_trace_id, 0, event, counter);
+    _jfr.recordEvent(lock_index, tid, call_trace_id, event_type, event);
+
+    _locks[lock_index].unlock();
+}
+
+void Profiler::recordExternalSample(u64 counter, int tid, jint event_type, Event* event, u32 call_trace_id) {
+    _call_trace_storage.add(call_trace_id, counter);
+
+    u32 lock_index = getLockIndex(tid);
+    if (!_locks[lock_index].tryLock() &&
+        !_locks[lock_index = (lock_index + 1) % CONCURRENCY_LEVEL].tryLock() &&
+        !_locks[lock_index = (lock_index + 2) % CONCURRENCY_LEVEL].tryLock())
+    {
+        return;
+    }
+
+    _jfr.recordEvent(lock_index, tid, call_trace_id, event_type, event);
 
     _locks[lock_index].unlock();
 }
@@ -706,6 +745,7 @@ Error Profiler::installTraps(const char* begin, const char* end) {
 void Profiler::uninstallTraps() {
     _begin_trap.uninstall();
     _end_trap.uninstall();
+    _engine->enableEvents(false);
 }
 
 void Profiler::trapHandler(int signo, siginfo_t* siginfo, void* ucontext) {
@@ -848,8 +888,8 @@ Engine* Profiler::selectEngine(const char* event_name) {
     }
 }
 
-Engine* Profiler::selectAllocEngine(long alloc_interval) {
-    if (VM::canSampleObjects() && (alloc_interval > 0 || VM::hotspot_version() == 0)) {
+Engine* Profiler::selectAllocEngine(long alloc_interval, bool live) {
+    if (VM::canSampleObjects() && (alloc_interval > 0 || live || VM::hotspot_version() == 0)) {
         return &object_sampler;
     } else if (VM::isOpenJ9()) {
         return &j9_object_sampler;
@@ -883,10 +923,9 @@ Error Profiler::checkJvmCapabilities() {
         if (lib == NULL || (_dlopen_entry = lib->findGlobalOffsetEntry((void*)dlopen)) == NULL) {
             return Error("Could not set dlopen hook. Unsupported JVM?");
         }
-        Symbols::makePatchable(lib);
     }
 
-    if (!VMStructs::hasDebugSymbols() && !VM::isOpenJ9()) {
+    if (!VMStructs::libjvm()->hasDebugSymbols()) {
         Log::warn("Install JVM debug symbols to improve profile accuracy");
     }
 
@@ -914,7 +953,7 @@ Error Profiler::start(Arguments& args, bool reset) {
     }
 
     if (args._fdtransfer) {
-        if (!FdTransferClient::connectToServer(args._fdtransfer_path, OS::processId())) {
+        if (!FdTransferClient::connectToServer(args._fdtransfer_path)) {
             return Error("Failed to initialize FdTransferClient");
         }
     }
@@ -997,7 +1036,7 @@ Error Profiler::start(Arguments& args, bool reset) {
     }
 
     if (_event_mask & EM_ALLOC) {
-        _alloc_engine = selectAllocEngine(args._alloc);
+        _alloc_engine = selectAllocEngine(args._alloc, args._live);
         error = _alloc_engine->start(args);
         if (error) {
             goto error2;
@@ -1037,6 +1076,7 @@ error1:
     _jfr.stop();
     unlockAll();
 
+    FdTransferClient::closePeer();
     return error;
 }
 
@@ -1084,7 +1124,7 @@ Error Profiler::check(Arguments& args) {
         error = _engine->check(args);
     }
     if (!error && args._alloc >= 0) {
-        _alloc_engine = selectAllocEngine(args._alloc);
+        _alloc_engine = selectAllocEngine(args._alloc, args._live);
         error = _alloc_engine->check(args);
     }
     if (!error && args._lock >= 0) {
@@ -1148,6 +1188,30 @@ Error Profiler::dump(std::ostream& out, Arguments& args) {
     return Error::OK;
 }
 
+void Profiler::printUsedMemory(std::ostream& out) {
+    size_t call_trace_storage = _call_trace_storage.usedMemory();
+    size_t dictionaries = _class_map.usedMemory() + _symbol_map.usedMemory() + _thread_filter.usedMemory() + _jfr.usedMemory();
+
+    size_t code_cache = _runtime_stubs.usedMemory();
+    int native_lib_count = _native_libs.count();
+    for (int i = 0; i < native_lib_count; i++) {
+        code_cache += _native_libs[i]->usedMemory();
+    }
+    code_cache += native_lib_count * sizeof(CodeCache);
+
+    char buf[1024];
+    const size_t KB = 1024;
+    snprintf(buf, sizeof(buf) - 1,
+             "Call trace storage: %7zu KB\n"
+             "      Dictionaries: %7zu KB\n"
+             "        Code cache: %7zu KB\n"
+             "------------------------------\n"
+             "             Total: %7zu KB\n",
+             call_trace_storage / KB, dictionaries / KB, code_cache / KB,
+             (call_trace_storage + dictionaries + code_cache) / KB);
+    out << buf;
+}
+
 void Profiler::lockAll() {
     for (int i = 0; i < CONCURRENCY_LEVEL; i++) _locks[i].lock();
 }
@@ -1171,7 +1235,7 @@ void Profiler::switchThreadEvents(jvmtiEventMode mode) {
  * <frame>;<frame>;...;<topmost frame> <count>
  */
 void Profiler::dumpCollapsed(std::ostream& out, Arguments& args) {
-    FrameName fn(args, args._style, _epoch, _thread_names_lock, _thread_names);
+    FrameName fn(args, args._style | STYLE_NO_SEMICOLON, _epoch, _thread_names_lock, _thread_names);
     char buf[32];
 
     std::vector<CallTraceSample*> samples;
@@ -1476,6 +1540,11 @@ Error Profiler::runInternal(Arguments& args, std::ostream& out) {
             } else {
                 out << "Profiler is not active\n";
             }
+            break;
+        }
+        case ACTION_MEMINFO: {
+            MutexLocker ml(_state_lock);
+            printUsedMemory(out);
             break;
         }
         case ACTION_LIST: {

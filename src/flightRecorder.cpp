@@ -46,8 +46,8 @@ static void JNICALL JfrSync_stopProfiler(JNIEnv* env, jclass cls) {
 }
 
 
-const int BUFFER_SIZE = 1024;
-const int BUFFER_LIMIT = BUFFER_SIZE - 128;
+const int SMALL_BUFFER_SIZE = 1024;
+const int SMALL_BUFFER_LIMIT = SMALL_BUFFER_SIZE - 128;
 const int RECORDING_BUFFER_SIZE = 65536;
 const int RECORDING_BUFFER_LIMIT = RECORDING_BUFFER_SIZE - 4096;
 const int MAX_STRING_LENGTH = 8191;
@@ -120,6 +120,15 @@ class MethodMap : public std::map<jmethodID, MethodInfo> {
             }
         }
     }
+
+    size_t usedMemory() {
+        size_t bytes = 0;
+        for (const_iterator it = begin(); it != end(); ++it) {
+            bytes += sizeof(jmethodID) + sizeof(MethodInfo);
+            bytes += it->second._line_number_table_size * sizeof(jvmtiLineNumberEntry);
+        }
+        return bytes;
+    }
 };
 
 class Lookup {
@@ -130,6 +139,21 @@ class Lookup {
     Dictionary _symbols;
 
   private:
+    void cutArguments(char* func) {
+        char* p = strrchr(func, ')');
+        if (p == NULL) return;
+
+        int balance = 1;
+        while (--p > func) {
+            if (*p == '(' && --balance == 0) {
+                *p = 0;
+                return;
+            } else if (*p == ')') {
+                balance++;
+            }
+        }
+    }
+
     void fillNativeMethodInfo(MethodInfo* mi, const char* name, const char* lib_name) {
         if (lib_name == NULL) {
             mi->_class = _classes->lookup("");
@@ -147,8 +171,7 @@ class Lookup {
             int status;
             char* demangled = abi::__cxa_demangle(name, NULL, NULL, &status);
             if (demangled != NULL) {
-                char* p = strchr(demangled, '(');
-                if (p != NULL) *p = 0;
+                cutArguments(demangled);
                 mi->_name = _symbols.lookup(demangled);
                 mi->_sig = _symbols.lookup("()L;");
                 mi->_type = FRAME_CPP;
@@ -262,12 +285,13 @@ class Lookup {
 class Buffer {
   private:
     int _offset;
-    char _data[BUFFER_SIZE - sizeof(int)];
+    char _data[0];
 
-  public:
+  protected:
     Buffer() : _offset(0) {
     }
 
+  public:
     const char* data() const {
         return _data;
     }
@@ -371,6 +395,15 @@ class Buffer {
     }
 };
 
+class SmallBuffer : public Buffer {
+  private:
+    char _buf[SMALL_BUFFER_SIZE - sizeof(Buffer)];
+
+  public:
+    SmallBuffer() : Buffer() {
+    }
+};
+
 class RecordingBuffer : public Buffer {
   private:
     char _buf[RECORDING_BUFFER_SIZE - sizeof(Buffer)];
@@ -410,7 +443,7 @@ class Recording {
     int _recorded_lib_count;
 
     bool _cpu_monitor_enabled;
-    Buffer _cpu_monitor_buf;
+    SmallBuffer _cpu_monitor_buf;
     CpuTimes _last_times;
 
     static float ratio(float value) {
@@ -418,8 +451,8 @@ class Recording {
     }
 
   public:
-    Recording(int fd, Arguments& args) : _fd(fd), _thread_set(), _method_map() {
-        _master_recording_file = args._jfr_sync == NULL ? NULL : strdup(args.file());
+    Recording(int fd, const char* master_recording_file, Arguments& args) : _fd(fd), _thread_set(), _method_map() {
+        _master_recording_file = master_recording_file == NULL ? NULL : strdup(master_recording_file);
         _chunk_start = lseek(_fd, 0, SEEK_END);
         _start_time = OS::micros();
         _start_ticks = TSC::ticks();
@@ -430,7 +463,6 @@ class Recording {
         _chunk_time = args._chunk_time <= 0 ? MAX_JLONG : (args._chunk_time < 5 ? 5 : args._chunk_time) * 1000000ULL;
 
         _tid = OS::threadId();
-        addThread(_tid);
         VM::jvmti()->GetAvailableProcessors(&_available_processors);
 
         writeHeader(_buf);
@@ -533,6 +565,10 @@ class Recording {
         return loadAcquire(_bytes_written) >= _chunk_size || wall_time - _start_time >= _chunk_time;
     }
 
+    size_t usedMemory() {
+        return _method_map.usedMemory() + _thread_set.usedMemory();
+    }
+
     void cpuMonitorCycle() {
         if (!_cpu_monitor_enabled) return;
 
@@ -558,7 +594,7 @@ class Recording {
         }
 
         recordCpuLoad(&_cpu_monitor_buf, proc_user, proc_system, machine_total);
-        flushIfNeeded(&_cpu_monitor_buf, BUFFER_LIMIT);
+        flushIfNeeded(&_cpu_monitor_buf, SMALL_BUFFER_LIMIT);
 
         _last_times = times;
     }
@@ -664,7 +700,7 @@ class Recording {
         buf->putVar32(T_METADATA);
         buf->putVar64(_start_ticks);
         buf->putVar32(0);
-        buf->putVar32(1);
+        buf->putVar32(0x7fffffff);  // must not clash with JFR metadata ID, or 'jfr print' will break
 
         std::vector<std::string>& strings = JfrMetadata::strings();
         buf->putVar32(strings.size());
@@ -741,7 +777,7 @@ class Recording {
             writeIntSetting(buf, T_MONITOR_ENTER, "lock", args._lock);
         }
 
-        writeBoolSetting(buf, T_ACTIVE_RECORDING, "debugSymbols", VMStructs::hasDebugSymbols());
+        writeBoolSetting(buf, T_ACTIVE_RECORDING, "debugSymbols", VMStructs::libjvm()->hasDebugSymbols());
         writeBoolSetting(buf, T_ACTIVE_RECORDING, "kernelSymbols", Symbols::haveKernelSymbols());
     }
 
@@ -921,8 +957,10 @@ class Recording {
     }
 
     void writeThreads(Buffer* buf) {
+        addThread(_tid);
         std::vector<int> threads;
         _thread_set.collect(threads);
+        _thread_set.clear();
 
         Profiler* profiler = Profiler::instance();
         MutexLocker ml(profiler->_thread_names_lock);
@@ -1102,6 +1140,18 @@ class Recording {
         buf->put8(start, buf->offset() - start);
     }
 
+    void recordLiveObject(Buffer* buf, int tid, u32 call_trace_id, LiveObject* event) {
+        int start = buf->skip(1);
+        buf->put8(T_LIVE_OBJECT);
+        buf->putVar64(TSC::ticks());
+        buf->putVar32(tid);
+        buf->putVar32(call_trace_id);
+        buf->putVar32(event->_class_id);
+        buf->putVar64(event->_alloc_size);
+        buf->putVar64(event->_alloc_time);
+        buf->put8(start, buf->offset() - start);
+    }
+
     void recordMonitorBlocked(Buffer* buf, int tid, u32 call_trace_id, LockEvent* event) {
         int start = buf->skip(1);
         buf->put8(T_MONITOR_ENTER);
@@ -1159,8 +1209,9 @@ Error FlightRecorder::start(Arguments& args, bool reset) {
     }
 
     char* filename_tmp = NULL;
+    const char* master_recording_file = NULL;
     if (args._jfr_sync != NULL) {
-        Error error = startMasterRecording(args);
+        Error error = startMasterRecording(args, master_recording_file = filename);
         if (error) {
             return error;
         }
@@ -1186,7 +1237,7 @@ Error FlightRecorder::start(Arguments& args, bool reset) {
         free(filename_tmp);
     }
 
-    _rec = new Recording(fd, args);
+    _rec = new Recording(fd, master_recording_file, args);
     _rec_lock.unlock();
     return Error::OK;
 }
@@ -1212,6 +1263,16 @@ void FlightRecorder::flush() {
     }
 }
 
+size_t FlightRecorder::usedMemory() {
+    size_t bytes = 0;
+    if (_rec != NULL) {
+        _rec_lock.lock();
+        bytes = _rec->usedMemory();
+        _rec_lock.unlock();
+    }
+    return bytes;
+}
+
 bool FlightRecorder::timerTick(u64 wall_time) {
     if (!_rec_lock.tryLockShared()) {
         // No active recording
@@ -1225,7 +1286,7 @@ bool FlightRecorder::timerTick(u64 wall_time) {
     return need_switch_chunk;
 }
 
-Error FlightRecorder::startMasterRecording(Arguments& args) {
+Error FlightRecorder::startMasterRecording(Arguments& args, const char* filename) {
     JNIEnv* env = VM::jni();
 
     if (_jfr_sync_class == NULL) {
@@ -1268,11 +1329,12 @@ Error FlightRecorder::startMasterRecording(Arguments& args) {
     }
     env->ExceptionClear();
 
-    jobject jfilename = env->NewStringUTF(args.file());
+    jobject jfilename = env->NewStringUTF(filename);
     jobject jsettings = args._jfr_sync == NULL ? NULL : env->NewStringUTF(args._jfr_sync);
     int event_mask = (args._event != NULL ? 1 : 0) |
                      (args._alloc >= 0 ? 2 : 0) |
-                     (args._lock >= 0 ? 4 : 0);
+                     (args._lock >= 0 ? 4 : 0) |
+                     ((args._jfr_options ^ JFR_SYNC_OPTS) << 4);
 
     env->CallStaticVoidMethod(_jfr_sync_class, _start_method, jfilename, jsettings, event_mask);
 
@@ -1291,7 +1353,7 @@ void FlightRecorder::stopMasterRecording() {
 }
 
 void FlightRecorder::recordEvent(int lock_index, int tid, u32 call_trace_id,
-                                 int event_type, Event* event, u64 counter) {
+                                 int event_type, Event* event) {
     if (_rec != NULL) {
         Buffer* buf = _rec->buffer(lock_index);
         switch (event_type) {
@@ -1303,6 +1365,9 @@ void FlightRecorder::recordEvent(int lock_index, int tid, u32 call_trace_id,
                 break;
             case BCI_ALLOC_OUTSIDE_TLAB:
                 _rec->recordAllocationOutsideTLAB(buf, tid, call_trace_id, (AllocEvent*)event);
+                break;
+            case BCI_LIVE_OBJECT:
+                _rec->recordLiveObject(buf, tid, call_trace_id, (LiveObject*)event);
                 break;
             case BCI_LOCK:
                 _rec->recordMonitorBlocked(buf, tid, call_trace_id, (LockEvent*)event);

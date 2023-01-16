@@ -27,6 +27,7 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.regex.Pattern;
 
 public class FlameGraph extends ResourceProcessor {
     public static final byte FRAME_INTERPRETED = 0;
@@ -68,6 +69,10 @@ public class FlameGraph extends ResourceProcessor {
     }
 
     public void addSample(String[] trace, long ticks) {
+        if (excludeTrace(trace)) {
+            return;
+        }
+
         Frame frame = root;
         if (args.reverse) {
             for (int i = trace.length; --i >= args.skip; ) {
@@ -163,6 +168,26 @@ public class FlameGraph extends ResourceProcessor {
         }
     }
 
+    private boolean excludeTrace(String[] trace) {
+        Pattern include = args.include;
+        Pattern exclude = args.exclude;
+        if (include == null && exclude == null) {
+            return false;
+        }
+
+        for (String frame : trace) {
+            if (exclude != null && exclude.matcher(frame).matches()) {
+                return true;
+            }
+            if (include != null && include.matcher(frame).matches()) {
+                include = null;
+                if (exclude == null) break;
+            }
+        }
+
+        return include != null;
+    }
+
     static String stripSuffix(String title) {
         return title.substring(0, title.length() - 4);
     }
@@ -183,6 +208,8 @@ public class FlameGraph extends ResourceProcessor {
             System.out.println("  --reverse");
             System.out.println("  --minwidth PERCENT");
             System.out.println("  --skip FRAMES");
+            System.out.println("  --include PATTERN");
+            System.out.println("  --exclude PATTERN");
             System.out.println("  --highlight PATTERN");
             System.exit(1);
         }
@@ -234,11 +261,13 @@ public class FlameGraph extends ResourceProcessor {
                 child = getChild(title, FRAME_KERNEL);
             } else if (title.endsWith("_[1]")) {
                 (child = getChild(stripSuffix(title), FRAME_JIT_COMPILED)).c1 += ticks;
+            } else if (title.endsWith("_[0]")) {
+                (child = getChild(stripSuffix(title), FRAME_JIT_COMPILED)).interpreted += ticks;
             } else if (title.contains("::") || title.startsWith("-[") || title.startsWith("+[")) {
                 child = getChild(title, FRAME_CPP);
             } else if (title.indexOf('/') > 0 && title.charAt(0) != '['
                     || title.indexOf('.') > 0 && Character.isUpperCase(title.charAt(0))) {
-                (child = getChild(title, FRAME_JIT_COMPILED)).interpreted += ticks;
+                child = getChild(title, FRAME_JIT_COMPILED);
             } else {
                 child = getChild(title, FRAME_NATIVE);
             }

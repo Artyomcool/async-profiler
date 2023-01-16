@@ -16,10 +16,7 @@
 
 package one.jfr;
 
-import one.jfr.event.AllocationSample;
-import one.jfr.event.ContendedLock;
-import one.jfr.event.Event;
-import one.jfr.event.ExecutionSample;
+import one.jfr.event.*;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -68,6 +65,7 @@ public class JfrReader implements Closeable {
     private int allocationInNewTLAB;
     private int allocationOutsideTLAB;
     private int allocationSample;
+    private int liveObject;
     private int monitorEnter;
     private int threadPark;
     private int activeSetting;
@@ -136,6 +134,8 @@ public class JfrReader implements Closeable {
                 if (cls == null || cls == AllocationSample.class) result = (E) readAllocationSample(true);
             } else if (type == allocationOutsideTLAB || type == allocationSample) {
                 if (cls == null || cls == AllocationSample.class) result = (E) readAllocationSample(false);
+            } else if (type == liveObject) {
+                if (cls == null || cls == LiveObject.class) return (E) readLiveObject();
             } else if (type == monitorEnter) {
                 if (cls == null || cls == ContendedLock.class) result = (E) readContendedLock(false);
             } else if (type == threadPark) {
@@ -174,7 +174,17 @@ public class JfrReader implements Closeable {
         return new AllocationSample(time, tid, stackTraceId, classId, allocationSize, tlabSize);
     }
 
-    protected ContendedLock readContendedLock(boolean hasTimeout) {
+    private LiveObject readLiveObject() {
+        long time = getVarlong();
+        int tid = getVarint();
+        int stackTraceId = getVarint();
+        int classId = getVarint();
+        long allocationSize = getVarlong();
+        long allocatimeTime = getVarlong();
+        return new LiveObject(time, tid, stackTraceId, classId, allocationSize, allocatimeTime);
+    }
+
+    private ContendedLock readContendedLock(boolean hasTimeout) {
         long time = getVarlong();
         long duration = getVarlong();
         int tid = getVarint();
@@ -327,10 +337,10 @@ public class JfrReader implements Closeable {
                 buf.position(buf.position() + (CHUNK_HEADER_SIZE + 3));
                 break;
             case "java.lang.Thread":
-                readThreads(type.field("group") != null);
+                readThreads(type.fields.size());
                 break;
             case "java.lang.Class":
-                readClasses(type.field("hidden") != null);
+                readClasses(type.fields.size());
                 break;
             case "jdk.types.Symbol":
                 readSymbols();
@@ -352,7 +362,7 @@ public class JfrReader implements Closeable {
         }
     }
 
-    protected void readThreads(boolean hasGroup) {
+    protected void readThreads(int fieldCount) {
         int count = threads.preallocate(getVarint());
         for (int i = 0; i < count; i++) {
             long id = getVarlong();
@@ -360,12 +370,12 @@ public class JfrReader implements Closeable {
             int osThreadId = getVarint();
             String javaName = getString();
             long javaThreadId = getVarlong();
-            if (hasGroup) getVarlong();
+            readFields(fieldCount - 4);
             threads.put(id, javaName != null ? javaName : osName);
         }
     }
 
-    private void readClasses(boolean hasHidden) {
+    private void readClasses(int fieldCount) {
         int count = classes.preallocate(getVarint());
         for (int i = 0; i < count; i++) {
             long id = getVarlong();
@@ -373,7 +383,7 @@ public class JfrReader implements Closeable {
             long name = getVarlong();
             long pkg = getVarlong();
             int modifiers = getVarint();
-            if (hasHidden) getVarint();
+            readFields(fieldCount - 4);
             classes.put(id, new ClassRef(name));
         }
     }
@@ -460,12 +470,19 @@ public class JfrReader implements Closeable {
         }
     }
 
+    private void readFields(int count) {
+        while (count-- > 0) {
+            getVarlong();
+        }
+    }
+
     private void cacheEventTypes() {
         executionSample = getTypeId("jdk.ExecutionSample");
         nativeMethodSample = getTypeId("jdk.NativeMethodSample");
         allocationInNewTLAB = getTypeId("jdk.ObjectAllocationInNewTLAB");
         allocationOutsideTLAB = getTypeId("jdk.ObjectAllocationOutsideTLAB");
         allocationSample = getTypeId("jdk.ObjectAllocationSample");
+        liveObject = getTypeId("profiler.LiveObject");
         monitorEnter = getTypeId("jdk.JavaMonitorEnter");
         threadPark = getTypeId("jdk.ThreadPark");
         activeSetting = getTypeId("jdk.ActiveSetting");

@@ -10,6 +10,7 @@ usage() {
     echo "  dump              dump collected data without stopping profiling session"
     echo "  check             check if the specified profiling event is available"
     echo "  status            print profiling status"
+    echo "  meminfo           print profiler memory stats"
     echo "  list              list profiling events supported by the target JVM"
     echo "  collect           collect profile for the specified period of time"
     echo "                    and then stop (default action)"
@@ -35,6 +36,7 @@ usage() {
     echo ""
     echo "  --loop time       run profiler in a loop"
     echo "  --alloc bytes     allocation profiling interval in bytes"
+    echo "  --live            build allocation profile from live objects only"
     echo "  --lock duration   lock profiling threshold in nanoseconds"
     echo "  --total           accumulate the total value (time, bytes, etc.)"
     echo "  --all-user        only include user-mode events"
@@ -93,7 +95,9 @@ check_if_terminated() {
 
 fdtransfer() {
     if [ "$USE_FDTRANSFER" = "true" ]; then
-        "$FDTRANSFER" "$PID"
+        FDTRANSFER_PATH="@async-profiler-$(od -An -N3 -i /dev/random | xargs)"
+        PARAMS="$PARAMS,fdtransfer=$FDTRANSFER_PATH"
+        "$FDTRANSFER" "$FDTRANSFER_PATH" "$PID"
     fi
 }
 
@@ -131,6 +135,7 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_BIN")" > /dev/null 2>&1; pwd -P)"
 JATTACH=$SCRIPT_DIR/build/jattach
 FDTRANSFER=$SCRIPT_DIR/build/fdtransfer
 USE_FDTRANSFER="false"
+FDTRANSFER_PATH=""
 PROFILER=$SCRIPT_DIR/build/libasyncProfiler.so
 ACTION="collect"
 DURATION="60"
@@ -146,7 +151,7 @@ while [ $# -gt 0 ]; do
         -h|"-?")
             usage
             ;;
-        start|resume|stop|dump|check|status|list|collect)
+        start|resume|stop|dump|check|status|meminfo|list|collect)
             ACTION="$1"
             ;;
         -v|--version)
@@ -238,6 +243,9 @@ while [ $# -gt 0 ]; do
         --sched)
             PARAMS="$PARAMS,sched"
             ;;
+        --live)
+            PARAMS="$PARAMS,live"
+            ;;
         --cstack|--call-graph)
             PARAMS="$PARAMS,cstack=$2"
             shift
@@ -259,7 +267,6 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --fdtransfer)
-            PARAMS="$PARAMS,fdtransfer"
             USE_FDTRANSFER="true"
             ;;
         --safe-mode)
@@ -347,7 +354,7 @@ case $ACTION in
     stop|dump)
         jattach "$ACTION,file=$FILE,$OUTPUT$FORMAT"
         ;;
-    status|list)
+    status|meminfo|list)
         jattach "$ACTION,file=$FILE"
         ;;
     version)

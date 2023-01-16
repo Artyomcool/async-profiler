@@ -19,11 +19,7 @@ import one.jfr.Dictionary;
 import one.jfr.JfrReader;
 import one.jfr.MethodRef;
 import one.jfr.StackTrace;
-import one.jfr.event.AllocationSample;
-import one.jfr.event.ContendedLock;
-import one.jfr.event.Event;
-import one.jfr.event.EventAggregator;
-import one.jfr.event.ExecutionSample;
+import one.jfr.event.*;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -34,20 +30,24 @@ import java.util.Map;
  */
 public class jfr2flame {
 
-    private static final String[] FRAME_SUFFIX = {"", "_[j]", "_[i]", "", "", "_[k]", "_[1]"};
+    private static final String[] FRAME_SUFFIX = {"_[0]", "_[j]", "_[i]", "", "", "_[k]", "_[1]"};
 
     private final JfrReader jfr;
+    private final Arguments args;
     private final Dictionary<String> methodNames = new Dictionary<>();
 
-    public jfr2flame(JfrReader jfr) {
+    public jfr2flame(JfrReader jfr, Arguments args) {
         this.jfr = jfr;
+        this.args = args;
     }
 
-    public void convert(final FlameGraph fg, final Arguments args) throws IOException {
+    public void convert(final FlameGraph fg) throws IOException {
         EventAggregator agg = new EventAggregator(args.threads, args.total);
 
-        Class<? extends Event> eventClass = args.alloc ? AllocationSample.class :
-                args.lock ? ContendedLock.class : ExecutionSample.class;
+        Class<? extends Event> eventClass =
+                args.live ? LiveObject.class :
+                        args.alloc ? AllocationSample.class :
+                                args.lock ? ContendedLock.class : ExecutionSample.class;
         int threadState = args.cpu ? getMapKey(jfr.threadStates, "STATE_RUNNABLE") : -1;
 
         long startTicks = args.from != 0 ? toTicks(args.from) : Long.MIN_VALUE;
@@ -70,6 +70,7 @@ public class jfr2flame {
             public void visit(Event event, long value) {
                 StackTrace stackTrace = jfr.stackTraces.get(event.stackTraceId);
                 if (stackTrace != null) {
+                    Arguments args = jfr2flame.this.args;
                     long[] methods = stackTrace.methods;
                     byte[] types = stackTrace.types;
                     int[] locations = stackTrace.locations;
@@ -112,6 +113,9 @@ public class jfr2flame {
         } else if (event instanceof ContendedLock) {
             classId = ((ContendedLock) event).classId;
             suffix = "_[i]";
+        } else if (event instanceof LiveObject) {
+            classId = ((LiveObject) event).classId;
+            suffix = "_[i]";
         } else {
             return null;
         }
@@ -127,36 +131,11 @@ public class jfr2flame {
             arrayDepth++;
         }
 
-        StringBuilder sb = new StringBuilder(toJavaClassName(className, arrayDepth));
+        StringBuilder sb = new StringBuilder(toJavaClassName(className, arrayDepth, true));
         while (arrayDepth-- > 0) {
             sb.append("[]");
         }
         return sb.append(suffix).toString();
-    }
-
-    private String toJavaClassName(byte[] symbol, int start) {
-        switch (symbol[start]) {
-            case 'B':
-                return "byte";
-            case 'C':
-                return "char";
-            case 'S':
-                return "short";
-            case 'I':
-                return "int";
-            case 'J':
-                return "long";
-            case 'Z':
-                return "boolean";
-            case 'F':
-                return "float";
-            case 'D':
-                return "double";
-            case 'L':
-                return new String(symbol, start + 1, symbol.length - start - 2, StandardCharsets.UTF_8).replace('/', '.');
-            default:
-                return new String(symbol, start, symbol.length - start, StandardCharsets.UTF_8).replace('/', '.');
-        }
     }
 
     private String getMethodName(long methodId, byte methodType) {
@@ -173,11 +152,10 @@ public class jfr2flame {
             byte[] className = cls == null ? null : jfr.symbols.get(cls.name);
             byte[] methodName = jfr.symbols.get(method.name);
 
-            if ((methodType >= FlameGraph.FRAME_NATIVE && methodType <= FlameGraph.FRAME_KERNEL)
-                    || className == null || className.length == 0) {
+            if (className == null || className.length == 0 || isNativeFrame(methodType)) {
                 result = new String(methodName, StandardCharsets.UTF_8);
             } else {
-                String classStr = new String(className, StandardCharsets.UTF_8);
+                String classStr = toJavaClassName(className, 0, args.dot);
                 String methodStr = new String(methodName, StandardCharsets.UTF_8);
                 result = classStr + '.' + methodStr;
             }
@@ -185,6 +163,50 @@ public class jfr2flame {
 
         methodNames.put(methodId, result);
         return result;
+    }
+
+    private boolean isNativeFrame(byte methodType) {
+        return methodType >= FlameGraph.FRAME_NATIVE && methodType <= FlameGraph.FRAME_KERNEL
+                && jfr.frameTypes.size() > FlameGraph.FRAME_NATIVE + 1;
+    }
+
+    private String toJavaClassName(byte[] symbol, int start, boolean dotted) {
+        int end = symbol.length;
+        if (start > 0) {
+            switch (symbol[start]) {
+                case 'B':
+                    return "byte";
+                case 'C':
+                    return "char";
+                case 'S':
+                    return "short";
+                case 'I':
+                    return "int";
+                case 'J':
+                    return "long";
+                case 'Z':
+                    return "boolean";
+                case 'F':
+                    return "float";
+                case 'D':
+                    return "double";
+                case 'L':
+                    start++;
+                    end--;
+            }
+        }
+
+        if (args.simple) {
+            for (int i = end - 2; i >= start; i--) {
+                if (symbol[i] == '/' && (symbol[i + 1] < '0' || symbol[i + 1] > '9')) {
+                    start = i + 1;
+                    break;
+                }
+            }
+        }
+
+        String s = new String(symbol, start, end - start, StandardCharsets.UTF_8);
+        return dotted ? s.replace('/', '.') : s;
     }
 
     // millis can be an absolute timestamp or an offset from the beginning/end of the recording
@@ -215,11 +237,14 @@ public class jfr2flame {
             System.out.println("options include all supported FlameGraph options, plus the following:");
             System.out.println("  --cpu        CPU Flame Graph");
             System.out.println("  --alloc      Allocation Flame Graph");
+            System.out.println("  --live       Include only live objects in allocation profile");
             System.out.println("  --lock       Lock contention Flame Graph");
             System.out.println("  --threads    Split profile by threads");
             System.out.println("  --total      Accumulate the total value (time, bytes, etc.)");
             System.out.println("  --lines      Show line numbers");
             System.out.println("  --bci        Show bytecode indices");
+            System.out.println("  --simple     Simple class names instead of FQN");
+            System.out.println("  --dot        Dotted class names");
             System.out.println("  --from TIME  Start time in ms (absolute or relative)");
             System.out.println("  --to TIME    End time in ms (absolute or relative)");
             System.out.println("  --collapsed  Use collapsed stacks output format");
@@ -230,7 +255,7 @@ public class jfr2flame {
         FlameGraph fg = collapsed ? new CollapsedStacks(args) : new FlameGraph(args);
 
         try (JfrReader jfr = new JfrReader(args.input)) {
-            new jfr2flame(jfr).convert(fg, args);
+            new jfr2flame(jfr, args).convert(fg);
         }
 
         fg.dump();
