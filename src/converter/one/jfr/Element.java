@@ -16,7 +16,7 @@
 
 package one.jfr;
 
-class Element {
+public class Element {
 
     void addChild(Element e) {
     }

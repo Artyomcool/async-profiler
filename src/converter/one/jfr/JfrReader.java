@@ -43,8 +43,8 @@ public class JfrReader implements Closeable {
     private static final int CHUNK_SIGNATURE = 0x464c5200;
 
     private final FileChannel ch;
-    private ByteBuffer buf;
-    private long filePosition;
+    protected ByteBuffer buf;
+    protected long filePosition;
 
     public boolean incomplete;
     public long startNanos = Long.MAX_VALUE;
@@ -52,16 +52,16 @@ public class JfrReader implements Closeable {
     public long startTicks = Long.MAX_VALUE;
     public long ticksPerSec;
 
-    public final Dictionary<JfrClass> types = new Dictionary<>();
+    public final Dictionary<JfrClass> types = new Dictionary<>(4096);
     public final Map<String, JfrClass> typesByName = new HashMap<>();
-    public final Dictionary<String> threads = new Dictionary<>();
-    public final Dictionary<ClassRef> classes = new Dictionary<>();
-    public final Dictionary<byte[]> symbols = new Dictionary<>();
-    public final Dictionary<MethodRef> methods = new Dictionary<>();
-    public final Dictionary<StackTrace> stackTraces = new Dictionary<>();
+    public final Dictionary<String> threads = new Dictionary<>(4096);
+    public final Dictionary<ClassRef> classes = new Dictionary<>(4096);
+    public final Dictionary<byte[]> symbols = new Dictionary<>(4096);
+    public final Dictionary<MethodRef> methods = new Dictionary<>(4096);
+    public final Dictionary<StackTrace> stackTraces = new Dictionary<>(4096);
     public final Map<Integer, String> frameTypes = new HashMap<>();
     public final Map<Integer, String> threadStates = new HashMap<>();
-    public final Map<String, String> settings = new HashMap<>();
+    public final Map<String, String> settings = new HashMap<>(64);
 
     private int executionSample;
     private int nativeMethodSample;
@@ -128,18 +128,23 @@ public class JfrReader implements Closeable {
                 break;
             }
 
+            E result = null;
+
             if (type == executionSample || type == nativeMethodSample) {
-                if (cls == null || cls == ExecutionSample.class) return (E) readExecutionSample();
+                if (cls == null || cls == ExecutionSample.class) result = (E) readExecutionSample();
             } else if (type == allocationInNewTLAB) {
-                if (cls == null || cls == AllocationSample.class) return (E) readAllocationSample(true);
+                if (cls == null || cls == AllocationSample.class) result = (E) readAllocationSample(true);
             } else if (type == allocationOutsideTLAB || type == allocationSample) {
-                if (cls == null || cls == AllocationSample.class) return (E) readAllocationSample(false);
+                if (cls == null || cls == AllocationSample.class) result = (E) readAllocationSample(false);
             } else if (type == monitorEnter) {
-                if (cls == null || cls == ContendedLock.class) return (E) readContendedLock(false);
+                if (cls == null || cls == ContendedLock.class) result = (E) readContendedLock(false);
             } else if (type == threadPark) {
-                if (cls == null || cls == ContendedLock.class) return (E) readContendedLock(true);
+                if (cls == null || cls == ContendedLock.class) result = (E) readContendedLock(true);
             } else if (type == activeSetting) {
                 readActiveSetting();
+            }
+            if (result != null) {
+                return result;
             }
 
             if ((pos += size) <= buf.limit()) {
@@ -151,7 +156,7 @@ public class JfrReader implements Closeable {
         return null;
     }
 
-    private ExecutionSample readExecutionSample() {
+    protected ExecutionSample readExecutionSample() {
         long time = getVarlong();
         int tid = getVarint();
         int stackTraceId = getVarint();
@@ -159,7 +164,7 @@ public class JfrReader implements Closeable {
         return new ExecutionSample(time, tid, stackTraceId, threadState);
     }
 
-    private AllocationSample readAllocationSample(boolean tlab) {
+    protected AllocationSample readAllocationSample(boolean tlab) {
         long time = getVarlong();
         int tid = getVarint();
         int stackTraceId = getVarint();
@@ -169,7 +174,7 @@ public class JfrReader implements Closeable {
         return new AllocationSample(time, tid, stackTraceId, classId, allocationSize, tlabSize);
     }
 
-    private ContendedLock readContendedLock(boolean hasTimeout) {
+    protected ContendedLock readContendedLock(boolean hasTimeout) {
         long time = getVarlong();
         long duration = getVarlong();
         int tid = getVarint();
@@ -290,7 +295,7 @@ public class JfrReader implements Closeable {
         }
     }
 
-    private boolean readConstantPool(long cpOffset) throws IOException {
+    protected boolean readConstantPool(long cpOffset) throws IOException {
         long delta;
         do {
             seek(cpOffset);
@@ -347,7 +352,7 @@ public class JfrReader implements Closeable {
         }
     }
 
-    private void readThreads(boolean hasGroup) {
+    protected void readThreads(boolean hasGroup) {
         int count = threads.preallocate(getVarint());
         for (int i = 0; i < count; i++) {
             long id = getVarlong();
@@ -386,10 +391,10 @@ public class JfrReader implements Closeable {
         }
     }
 
-    private void readStackTraces() {
+    protected void readStackTraces() {
         int count = stackTraces.preallocate(getVarint());
         for (int i = 0; i < count; i++) {
-            long id = getVarlong();
+            int id = getVarint();
             int truncated = getVarint();
             StackTrace stackTrace = readStackTrace();
             stackTraces.put(id, stackTrace);
@@ -472,18 +477,28 @@ public class JfrReader implements Closeable {
         return type != null ? type.id : -1;
     }
 
-    private int getVarint() {
-        int result = 0;
-        for (int shift = 0; ; shift += 7) {
-            byte b = buf.get();
-            result |= (b & 0x7f) << shift;
-            if (b >= 0) {
-                return result;
-            }
+    protected int getVarint() {
+        int x;
+        if ((x = buf.get()) >= 0) {
+            return x;
         }
+        x &= 0x7f;
+        int y;
+        if ((y = buf.get()) >= 0) {
+            return x | y << 7;
+        }
+        x |= (y & 0x7f) << 7;
+        if ((y = buf.get()) >= 0) {
+            return x | y << 14;
+        }
+        x |= (y & 0x7f) << 14;
+        if ((y = buf.get()) >= 0) {
+            return x | y << 21;
+        }
+        return x | buf.get() << 28 | (y & 0x7f) << 21;
     }
 
-    private long getVarlong() {
+    protected long getVarlong() {
         long result = 0;
         for (int shift = 0; shift < 56; shift += 7) {
             byte b = buf.get();
@@ -493,6 +508,53 @@ public class JfrReader implements Closeable {
             }
         }
         return result | (buf.get() & 0xffL) << 56;
+    }
+
+    protected void skipVarint() {
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        buf.get();
+    }
+
+    protected void skipVarlong() {
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        if (buf.get() >= 0) {
+            return;
+        }
+        buf.get();
     }
 
     private String getString() {
@@ -517,19 +579,38 @@ public class JfrReader implements Closeable {
         }
     }
 
+    protected void skipString() {
+        switch (buf.get()) {
+            case 0:
+            case 1:
+                break;
+            case 4:
+                for (int i = getVarint(); i > 0; i--) {
+                    getVarint();
+                }
+                break;
+            case 3:
+            case 5: {
+                int len = getVarint();
+                buf.position(buf.position() + len);
+                break;
+            }
+        }
+    }
+
     private byte[] getBytes() {
         byte[] bytes = new byte[getVarint()];
         buf.get(bytes);
         return bytes;
     }
 
-    private void seek(long pos) throws IOException {
+    protected void seek(long pos) throws IOException {
         filePosition = pos;
         ch.position(pos);
         buf.rewind().flip();
     }
 
-    private boolean ensureBytes(int needed) throws IOException {
+    protected boolean ensureBytes(int needed) throws IOException {
         if (buf.remaining() >= needed) {
             return true;
         }

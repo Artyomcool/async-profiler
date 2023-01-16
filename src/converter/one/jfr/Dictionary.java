@@ -16,6 +16,8 @@
 
 package one.jfr;
 
+import java.util.Arrays;
+
 /**
  * Fast and compact long->Object map.
  */
@@ -36,8 +38,8 @@ public class Dictionary<T> {
     }
 
     public void clear() {
-        keys = new long[INITIAL_CAPACITY];
-        values = new Object[INITIAL_CAPACITY];
+        Arrays.fill(keys, 0);
+        Arrays.fill(values, null);
         size = 0;
     }
 

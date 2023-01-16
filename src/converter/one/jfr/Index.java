@@ -20,15 +20,20 @@ package one.jfr;
  * Fast and compact Object->int map.
  */
 public class Index<T> {
-    private static final int INITIAL_CAPACITY = 16;
+    protected static final int INITIAL_CAPACITY = 16 * 1024;
 
     private Object[] keys;
     private int[] values;
-    private int size;
+
+    public int size;
 
     public Index() {
-        this.keys = new Object[INITIAL_CAPACITY];
-        this.values = new int[INITIAL_CAPACITY];
+        this(INITIAL_CAPACITY);
+    }
+
+    public Index(int initialCapacity) {
+        this.keys = new Object[initialCapacity];
+        this.values = new int[initialCapacity];
     }
 
     public int index(T key) {
@@ -38,20 +43,28 @@ public class Index<T> {
 
         int mask = keys.length - 1;
         int i = hashCode(key) & mask;
-        while (keys[i] != null) {
+        while (true) {
+            Object currentKey = keys[i];
+            if (currentKey == null) {
+                break;
+            }
             //noinspection unchecked
-            if (equals((T) keys[i], key)) {
+            if (equals((T) currentKey, key)) {
                 return values[i];
             }
             i = (i + 1) & mask;
         }
-        keys[i] = key;
-        values[i] = ++size;
+        insertAt(i, key);
+        return size;
+    }
+
+    protected void insertAt(int pos, T key) {
+        keys[pos] = key;
+        values[pos] = ++size;
 
         if (size * 2 > keys.length) {
             resize(keys.length * 2);
         }
-        return size;
     }
 
     @SuppressWarnings("unchecked")
@@ -76,7 +89,7 @@ public class Index<T> {
     }
 
     @SuppressWarnings("unchecked")
-    private void resize(int newCapacity) {
+    protected void resize(int newCapacity) {
         Object[] newKeys = new Object[newCapacity];
         int[] newValues = new int[newCapacity];
         int mask = newKeys.length - 1;
