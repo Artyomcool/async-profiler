@@ -108,32 +108,14 @@ public class FlameGraph extends ResourceProcessor {
         tail = printTill(out, tail, "/*height:*/300");
         out.print(Math.min(depth * 16, 32767));
 
-        tail = printTill(out, tail, "/*if heatmap css:*/");
-        tail = skipTill(tail, "/*end if heatmap css*/");
-
-        tail = printTill(out, tail, "/*if heatmap html:*/");
-        tail = skipTill(tail, "/*end if heatmap html*/");
-
         tail = printTill(out, tail, "/*title:*/");
         out.print(args.title);
-
-        tail = printTill(out, tail, "/*if color scheme:*/");
-        tail = skipTill(tail, "/*end if color scheme*/");
-
-        tail = printTill(out, tail, "/*if flamegraph html:*/");
-        tail = printTill(out, tail, "/*end if flamegraph html*/");
 
         tail = printTill(out, tail, "/*reverse:*/false");
         out.print(args.reverse);
 
         tail = printTill(out, tail, "/*depth:*/0");
         out.print(depth);
-
-        tail = printTill(out, tail, "/*if flamegraph js:*/");
-        tail = printTill(out, tail, "/*end if flamegraph js*/");
-
-        tail = printTill(out, tail, "/*if heatmap js:*/");
-        tail = skipTill(tail, "/*end if heatmap js*/");
 
         tail = printTill(out, tail, "/*frames:*/");
 

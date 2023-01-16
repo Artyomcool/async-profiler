@@ -56,7 +56,7 @@ public class jfr2heat {
             try (JfrReader jfr = new JfrReader(file) {
 
                 @Override
-                protected void readThreads(boolean hasGroup) {
+                protected void readThreads(int fieldsCount) {
                     int count = getVarint();
                     for (int i = 0; i < count; i++) {
                         skipVarlong();
@@ -64,7 +64,9 @@ public class jfr2heat {
                         skipVarint();
                         skipString();
                         skipVarlong();
-                        if (hasGroup) skipVarlong();
+                        for (int f = 4; f < fieldsCount; f++) {
+                            skipVarlong();
+                        }
                     }
                 }
 

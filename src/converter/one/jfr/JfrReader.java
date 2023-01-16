@@ -184,7 +184,7 @@ public class JfrReader implements Closeable {
         return new LiveObject(time, tid, stackTraceId, classId, allocationSize, allocatimeTime);
     }
 
-    private ContendedLock readContendedLock(boolean hasTimeout) {
+    protected ContendedLock readContendedLock(boolean hasTimeout) {
         long time = getVarlong();
         long duration = getVarlong();
         int tid = getVarint();
