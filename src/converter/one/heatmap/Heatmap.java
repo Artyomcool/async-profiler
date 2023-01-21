@@ -1,27 +1,29 @@
-import one.jfr.*;
+package one.heatmap;
+
+import one.jfr.ClassRef;
+import one.jfr.MethodRef;
+import one.util.Dictionary;
+import one.util.DictionaryInt;
+import one.util.Index;
+import one.util.ResourceProcessor;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.PrintStream;
 import java.util.Arrays;
 import java.util.Comparator;
 
 public class Heatmap extends ResourceProcessor {
 
-    private final SampleList sampleList;
-    private final StackStorage stackTracesRemap = new StackStorage();
-
     private final String title;
 
-    private final DictionaryInt stackTracesCache = new DictionaryInt();
-    private final MethodCache methodsCache = new MethodCache();
+    private State state;
 
     private long startMs;
 
     public Heatmap(String title, long blockDurationMs) {
         this.title = title;
 
-        this.sampleList = new SampleList(blockDurationMs);
+        this.state = new State(blockDurationMs);
     }
 
     public void assignConstantPool(
@@ -29,55 +31,20 @@ public class Heatmap extends ResourceProcessor {
             Dictionary<ClassRef> classRefs,
             Dictionary<byte[]> symbols
     ) {
-        methodsCache.assignConstantPool(methodRefs, classRefs, symbols);
+        state.methodsCache.assignConstantPool(methodRefs, classRefs, symbols);
     }
 
     public void nextFile() {
-        stackTracesCache.clear();
-        methodsCache.clear();
+        state.stackTracesCache.clear();
+        state.methodsCache.clear();
     }
 
     public void addEvent(int stackTraceId, int extra, byte type, long timeMs) {
-        if (extra == 0) {
-            sampleList.add(stackTracesCache.get(stackTraceId), timeMs);
-            return;
-        }
-
-        int id = stackTracesCache.get((long) extra << 32 | stackTraceId, -1);
-        if (id != -1) {
-            sampleList.add(id, timeMs);
-            return;
-        }
-
-        int prototypeId = stackTracesCache.get(stackTraceId);
-        int[] prototype = stackTracesRemap.get(prototypeId);
-
-        id = stackTracesRemap.indexWithPrototype(prototype, methodsCache.indexForClass(extra, type));
-        stackTracesCache.put((long) extra << 32 | stackTraceId, id);
-
-        sampleList.add(id, timeMs);
+        state.addEvent(stackTraceId, extra, type, timeMs);
     }
 
-    private int[] cachedStackTrace = new int[4096];
-
     public void addStack(int id, long[] methods, int[] locations, byte[] types, int size) {
-        int[] stackTrace = cachedStackTrace;
-        if (stackTrace.length < size) {
-            cachedStackTrace = stackTrace = new int[size * 2];
-        }
-
-        for (int i = size - 1; i >= 0; i--) {
-            long methodId = methods[i];
-            byte type = types[i];
-            int location = locations[i];
-
-            int index = size - 1 - i;
-            boolean firstMethodInTrace = index == 0;
-
-            stackTrace[index] = methodsCache.index(methodId, location, type, firstMethodInTrace);
-        }
-
-        stackTracesCache.put(id, stackTracesRemap.index(stackTrace, size));
+        state.addStack(id, methods, locations, types, size);
     }
 
     public void finish(long startMs) {
@@ -87,15 +54,17 @@ public class Heatmap extends ResourceProcessor {
     }
 
     private EvaluationContext evaluate() {
+        State state = this.state;
+        this.state = null;
         return new EvaluationContext(
-                sampleList.destoyForSamples(),
-                methodsCache.methodsIndex(),
-                stackTracesRemap.destroyForOrderedTraces(),
-                methodsCache.orderedSymbolTable()
+                state.sampleList.samples(),
+                state.methodsCache.methodsIndex(),
+                state.stackTracesRemap.orderedTraces(),
+                state.methodsCache.orderedSymbolTable()
         );
     }
 
-    private void compressMethods(Output out, Method[] methods) throws IOException {
+    private void compressMethods(HtmlOut out, Method[] methods) throws IOException {
         for (Method method : methods) {
             out.write18(method.className);
             out.write18(method.methodName);
@@ -112,59 +81,26 @@ public class Heatmap extends ResourceProcessor {
 
         String tail = getResource("/heatmap.html");
 
-        tail = printTill(out, tail, "/*height:*/300");
-        out.write("300".getBytes());
-
-        tail = printTill(out, tail, "/*if heatmap css:*/");
-        tail = printTill(out, tail, "/*end if heatmap css*/");
-
-        tail = printTill(out, tail, "/*if heatmap html:*/");
-
         tail = printTill(out, tail, "/*executionsHeatmap:*/");
         out.resetPos();
-        int was = out.pos();
         printHeatmap(out, evaluationContext);
-        System.out.println("heatmap " + (out.pos() - was) / 1024.0 / 1024.0 + " MB");
 
         tail = printTill(out, tail, "/*methods:*/");
-        was = out.pos();
         printMethods(out, evaluationContext);
-        System.out.println("methods " + (out.pos() - was) / 1024.0 / 1024.0 + " MB");
 
-        tail = printTill(out, tail, "/*end if heatmap html*/");
         tail = printTill(out, tail, "/*title:*/");
         out.write(title.getBytes());
-
-        tail = printTill(out, tail, "/*if flamegraph html:*/");
-        tail = skipTill(tail, "/*end if flamegraph html*/");
-
-        tail = printTill(out, tail, "/*reverse:*/false");
-        out.write("true".getBytes());
-
-        tail = printTill(out, tail, "/*depth:*/0");
-        out.write("0".getBytes());
-
-        tail = printTill(out, tail, "/*if flamegraph js:*/");
-        tail = skipTill(tail, "/*end if flamegraph js*/");
-
-        tail = printTill(out, tail, "/*if heatmap js:*/");
 
         tail = printTill(out, tail, "/*startMs:*/0");
         out.write(String.valueOf(startMs).getBytes());
 
         tail = printTill(out, tail, "/*cpool:*/");
-        was = out.pos();
         printConstantPool(out, evaluationContext);
-        System.out.println("constant pool " + (out.pos() - was) / 1024.0 / 1024.0 + " MB");
 
-        tail = printTill(out, tail, "/*end if heatmap js*/");
-
-        tail = printTill(out, tail, "/*frames:*/");
         out.write(tail.getBytes());
-
     }
 
-    private void printHeatmap(final Output out, EvaluationContext context) throws IOException {
+    private void printHeatmap(final HtmlOut out, EvaluationContext context) throws IOException {
         Histogram histogram = new Histogram();
 
         int veryStart = out.pos();
@@ -180,34 +116,34 @@ public class Heatmap extends ResourceProcessor {
         writeStartMethods(out, context);
         wasPos = debugStep("start methods", out, wasPos, veryStart);
 
-        // writes block sizes
+        // writes block sizes, compressed by huffman algorithm
         writeBlockSizes(out, context);
         wasPos = debugStep("stack sizes", out, wasPos, veryStart);
 
-        // destroys internal state!
+        // NOTE: destroys internal state!
         context.nodeTree.calculateSynonyms();
         // writes frequent lz tree nodes as a synonyms table
         writeTreeSynonyms(out, context);
         wasPos = debugStep("tree synonyms", out, wasPos, veryStart);
 
+        // writes lz tree with two pairs of var-ints: [parent node id] + [method id of this node]
         writeTree(out, context);
         wasPos = debugStep("tree body", out, wasPos, veryStart);
 
         // calculate counts for the next synonyms table, that will be used for samples
         int chunksCount = calculateAndWriteSamplesSynonyms(context, stackChunksBuffer);
-        System.out.println("chunksCount " + chunksCount);
-        // writes frequent lz tree nodes as a synonyms table
+        // writes frequent lz tree nodes as a synonyms table (for sample chunks)
         writeTreeSynonyms(out, context);
         wasPos = debugStep("samples synonyms", out, wasPos, veryStart);
 
-        // writes bodies chunks
+        // writes sample chunks as var-ints references for [node id]
         writeSamples(out, context, stackChunksBuffer);
         debugStep("samples body", out, wasPos, veryStart);
 
         // calculates amount of storage needed for unpacking samples
-        long storageSize = calculateStorageSize(context);
+        long storageSize = calculateStorageSizeAndUniqueNodes(context);
+        // FIXME something wrong with storage size!!!
         System.out.println("storageSize " + (storageSize >> 32) * 4 / 1024.0 / 1024.0 + " MB (" + (storageSize >> 32) + ")");
-        System.out.println("uniqueChunks " + (int) storageSize);
 
         out.write30(context.nodeTree.nodesCount());
         out.write30(context.sampleList.blockSizes.length);
@@ -215,13 +151,11 @@ public class Heatmap extends ResourceProcessor {
         out.write30(chunksCount);
         out.write30((int) storageSize);  // unique chunks
         out.write30(context.sampleList.stackIds.length);
-        System.out.println("stacksCount " + context.sampleList.stackIds.length);
 
-        System.out.println("all data length " + (out.pos() - veryStart) / 1024.0 / 1024.0 + " MB (" + (out.pos() - veryStart) + ")");
         histogram.print();
     }
 
-    private long calculateStorageSize(EvaluationContext context) {
+    private long calculateStorageSizeAndUniqueNodes(EvaluationContext context) {
         int storageSize = 0;
         int uniqueCount = 0;
         long[] parentsWithSizes = context.nodeTree.nodesParentsWithSizes();
@@ -252,9 +186,7 @@ public class Heatmap extends ResourceProcessor {
         return (long) storageSize << 32 | uniqueCount;
     }
 
-    private void writeSamples(Output out, EvaluationContext context, int[] stackChunksBuffer) throws IOException {
-        System.out.println("writeSamples " + out.pos());
-        int sample = 0;
+    private void writeSamples(HtmlOut out, EvaluationContext context, int[] stackChunksBuffer) throws IOException {
         for (int stackId : context.sampleList.stackIds) {
             int chunksStart = stackChunksBuffer[stackId * 2];
             int chunksEnd = stackChunksBuffer[stackId * 2 + 1];
@@ -265,9 +197,7 @@ public class Heatmap extends ResourceProcessor {
                 parentsWithSizes[nodeId] &= 0x7FFF_FFFF_FFFF_FFFFL;
                 out.writeVar(context.nodeTree.nodeIdOrSynonym(nodeId));
             }
-            sample++;
         }
-        System.out.println("sample " + sample);
     }
 
     private int calculateAndWriteSamplesSynonyms(EvaluationContext context, int[] stackChunksBuffer) {
@@ -289,7 +219,7 @@ public class Heatmap extends ResourceProcessor {
         return chunksCount;
     }
 
-    private void writeTree(Output out, EvaluationContext context) throws IOException {
+    private void writeTree(HtmlOut out, EvaluationContext context) throws IOException {
         long[] data = context.nodeTree.data();
         for (int i = 0; i < context.nodeTree.nodesCount() - 1; i++) {
             long d = data[i];
@@ -300,7 +230,7 @@ public class Heatmap extends ResourceProcessor {
         }
     }
 
-    private void writeTreeSynonyms(final Output out, EvaluationContext context) throws IOException {
+    private void writeTreeSynonyms(final HtmlOut out, EvaluationContext context) throws IOException {
         out.writeVar(context.nodeTree.synonymsCount());
         context.nodeTree.visitTreeNodeSynonyms(new LzNodeTree.SynonymVisitor() {
             @Override
@@ -314,14 +244,7 @@ public class Heatmap extends ResourceProcessor {
         });
     }
 
-    private int debugStep(String step, Output out, int wasPos, int veryStartPos) {
-        int nowPos = out.pos();
-        System.out.println(step + " " + (nowPos - wasPos) / (1024.0 * 1024.0) + " MB");
-        System.out.println(step + " pos in data " + (nowPos - veryStartPos));
-        return nowPos;
-    }
-
-    private void writeStartMethods(Output out, EvaluationContext context) throws IOException {
+    private void writeStartMethods(HtmlOut out, EvaluationContext context) throws IOException {
         int startsCount = 0;
         for (Method method : context.orderedMethods) {
             if (method.start) {
@@ -334,7 +257,6 @@ public class Heatmap extends ResourceProcessor {
                 out.writeVar(method.frequencyOrNewMethodId);
             }
         }
-        System.out.println("start methods count " + startsCount);
     }
 
     private void renameMethodsByFrequency(EvaluationContext context) {
@@ -359,6 +281,7 @@ public class Heatmap extends ResourceProcessor {
 
         // prepared data for output, firstly used to remember last stack positions
         int[] stackBuffer = new int[(context.stackTraces.length + 1) * 16];
+
         // remember the last position of stackId
         for (int i = 0; i < samples.length; i++) {
             int stackId = samples[i];
@@ -408,7 +331,7 @@ public class Heatmap extends ResourceProcessor {
         return stackBuffer;
     }
 
-    private void writeBlockSizes(Output out, EvaluationContext context) throws IOException {
+    private void writeBlockSizes(HtmlOut out, EvaluationContext context) throws IOException {
         int[] blockSizeFrequencies = new int[1024];
         int maxBlockSize = 0;
         for (int blockSize : context.sampleList.blockSizes) {
@@ -433,7 +356,6 @@ public class Heatmap extends ResourceProcessor {
             out.writeVar(l >>> 56);
         }
 
-        int i = 0;
         for (int blockSize : context.sampleList.blockSizes) {
             if (encoder.append(blockSize)) {
                 for (int value : encoder.values) {
@@ -448,7 +370,7 @@ public class Heatmap extends ResourceProcessor {
         }
     }
 
-    private void printConstantPool(Output out, EvaluationContext evaluationContext) throws IOException {
+    private void printConstantPool(HtmlOut out, EvaluationContext evaluationContext) throws IOException {
         for (byte[] symbol : evaluationContext.symbols) {
             out.nextByte('"');
             out.write(symbol);
@@ -457,8 +379,8 @@ public class Heatmap extends ResourceProcessor {
         }
     }
 
-    private void printMethods(Output out, EvaluationContext evaluationContext) throws IOException {
-        System.out.println("methods count " + evaluationContext.orderedMethods.length);
+    private void printMethods(HtmlOut out, EvaluationContext evaluationContext) throws IOException {
+        debug("methods count " + evaluationContext.orderedMethods.length);
         Arrays.sort(evaluationContext.orderedMethods, new Comparator<Method>() {
             @Override
             public int compare(Method o1, Method o2) {
@@ -470,7 +392,18 @@ public class Heatmap extends ResourceProcessor {
         out.nextByte('A');
     }
 
-    private static String printTill(Output out, String tail, String till) {
+    private int debugStep(String step, HtmlOut out, int wasPos, int veryStartPos) {
+        int nowPos = out.pos();
+        debug(step + " " + (nowPos - wasPos) / (1024.0 * 1024.0) + " MB");
+        debug(step + " pos in data " + (nowPos - veryStartPos));
+        return nowPos;
+    }
+
+    private void debug(String text) {
+        System.out.println(text);
+    }
+
+    private static String printTill(HtmlOut out, String tail, String till) {
         return printTill(out.asPrintableStream(), tail, till);
     }
 
@@ -495,118 +428,62 @@ public class Heatmap extends ResourceProcessor {
         }
     }
 
-    private interface Output {
-        void writeVar(long v) throws IOException;
+    private static class State {
 
-        void write6(int v) throws IOException;
+        final SampleList sampleList;
+        final StackStorage stackTracesRemap = new StackStorage();
 
-        void write18(int v) throws IOException;
+        final DictionaryInt stackTracesCache = new DictionaryInt();
+        final MethodCache methodsCache = new MethodCache();
 
-        void write30(int v) throws IOException;
+        // reusable array to (temporary) store (potentially) new stack trace
+        int[] cachedStackTrace = new int[4096];
 
-        void write(byte[] data) throws IOException;
-
-        void nextByte(int ch) throws IOException;
-
-        int pos();
-
-        PrintStream asPrintableStream();
-    }
-
-    public static class HtmlOut implements Output {
-
-        private final OutputStream out;
-
-        private int pos = 0;
-
-        public HtmlOut(OutputStream out) {
-            this.out = out;
+        State(long blockDurationMs) {
+            sampleList = new SampleList(blockDurationMs);
         }
 
-        public void resetPos() {
-            pos = 0;
-        }
-
-        public void nextByte(int ch) throws IOException {
-            int c = ch;
-            switch (ch) {
-                case 0:
-                    c = 127;
-                    break;
-                case '\r':
-                    c = 126;
-                    break;
-                case '&':
-                    c = 125;
-                    break;
-                case '<':
-                    c = 124;
-                    break;
-                case '>':
-                    c = 123;
-                    break;
+        public void addEvent(int stackTraceId, int extra, byte type, long timeMs) {
+            if (extra == 0) {
+                sampleList.add(stackTracesCache.get(stackTraceId), timeMs);
+                return;
             }
-            out.write(c);
-            pos++;
-        }
 
-        @Override
-        public void writeVar(long v) throws IOException {
-            while (v >= 61) {
-                int b = 61 + (int) (v % 61);
-                nextByte(b);
-                v /= 61;
+            int id = stackTracesCache.get((long) extra << 32 | stackTraceId, -1);
+            if (id != -1) {
+                sampleList.add(id, timeMs);
+                return;
             }
-            nextByte((int) v);
+
+            int prototypeId = stackTracesCache.get(stackTraceId);
+            int[] prototype = stackTracesRemap.get(prototypeId);
+
+            id = stackTracesRemap.indexWithPrototype(prototype, methodsCache.indexForClass(extra, type));
+            stackTracesCache.put((long) extra << 32 | stackTraceId, id);
+
+            sampleList.add(id, timeMs);
         }
 
-        @Override
-        public void write6(int v) throws IOException {
-            if ((v & (0xFFFFFFC0)) != 0) {
-                throw new IllegalArgumentException("Value " + v + " is out of bounds");
+        public void addStack(int id, long[] methods, int[] locations, byte[] types, int size) {
+            int[] stackTrace = cachedStackTrace;
+            if (stackTrace.length < size) {
+                cachedStackTrace = stackTrace = new int[size * 2];
             }
-            nextByte(v);
-        }
 
-        @Override
-        public void write18(int v) throws IOException {
-            if ((v & (~0x3FFFF)) != 0) {
-                throw new IllegalArgumentException("Value " + v + " is out of bounds");
+            for (int i = size - 1; i >= 0; i--) {
+                long methodId = methods[i];
+                byte type = types[i];
+                int location = locations[i];
+
+                int index = size - 1 - i;
+                boolean firstMethodInTrace = index == 0;
+
+                stackTrace[index] = methodsCache.index(methodId, location, type, firstMethodInTrace);
             }
-            for (int i = 0; i < 3; i++) {
-                nextByte(v & 0x3F);
-                v >>>= 6;
-            }
-        }
 
-        @Override
-        public void write30(int v) throws IOException {
-            if ((v & 0xFFFF_FFFF_C000_0000L) != 0) {
-                throw new IllegalArgumentException("Value " + v + " is out of bounds");
-            }
-            for (int i = 0; i < 5; i++) {
-                nextByte(v & 0x3F);
-                v >>>= 6;
-            }
-        }
-
-        @Override
-        public void write(byte[] data) throws IOException {
-            out.write(data);
-            pos += data.length;
-        }
-
-        @Override
-        public int pos() {
-            return pos;
-        }
-
-        @Override
-        public PrintStream asPrintableStream() {
-            return new PrintStream(out);
+            stackTracesCache.put(id, stackTracesRemap.index(stackTrace, size));
         }
 
     }
-
 
 }

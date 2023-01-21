@@ -1,4 +1,10 @@
-import one.jfr.*;
+package one.heatmap;
+
+import one.jfr.ClassRef;
+import one.jfr.MethodRef;
+import one.util.Dictionary;
+import one.util.Frames;
+import one.util.Index;
 
 import java.util.Arrays;
 
@@ -125,7 +131,7 @@ public class MethodCache {
     }
 
     private boolean isNativeFrame(byte methodType) {
-        return methodType >= FlameGraph.FRAME_NATIVE && methodType <= FlameGraph.FRAME_KERNEL;
+        return methodType >= Frames.FRAME_NATIVE && methodType <= Frames.FRAME_KERNEL;
     }
 
     public byte[][] orderedSymbolTable() {

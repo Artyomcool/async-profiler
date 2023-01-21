@@ -9,32 +9,26 @@
             background-color: #ffffff;
             overflow-y: scroll
         }
-
         h1 {
             margin: 5px 0 0 0;
             font-size: 18px;
             font-weight: normal;
             text-align: center
         }
-
         header {
             margin: -24px 0 5px 0;
             line-height: 24px
         }
-
         button {
             font: 12px sans-serif;
             cursor: pointer
         }
-
         p {
             margin: 5px 0 5px 0
         }
-
         a {
             color: #0366d6
         }
-
         #hl {
             position: absolute;
             display: none;
@@ -45,7 +39,6 @@
             outline: 1px solid #ffc000;
             height: 15px
         }
-
         #preview_wrapper {
             position: absolute;
             display: none;
@@ -53,16 +46,13 @@
             outline: 1px solid #ffc000;
             pointer-events: none;
         }
-
         #hl span {
             padding: 0 3px 0 3px
         }
-
         #status {
             overflow: hidden;
             white-space: nowrap
         }
-
         #match {
             overflow: hidden;
             white-space: nowrap;
@@ -70,52 +60,40 @@
             float: right;
             text-align: right
         }
-
         #reset {
             cursor: pointer
         }
-
         #canvas {
             width: 100%;
-            height: /*height:*/300px
+            height: 300px;
         }
-
-        /*if heatmap css:*/
         .selectionPart {
             position: absolute;
             display: none;
             pointer-events: none;
             box-sizing: border-box;
         }
-
         .sel {
             background-color: #dada0040
         }
-
         .act {
             background-color: #00da0040
         }
-
         .dif {
             background-color: #00dada40
         }
-
         .top {
             border-top: .1px solid #000
         }
-
         .left {
             border-left: .1px solid #000
         }
-
         .bottom {
             border-bottom: .1px solid #000
         }
-
         .right {
             border-right: .1px solid #000
         }
-
         #info-tooltip {
             display: none;
             position: absolute;
@@ -127,39 +105,36 @@
             border-radius: 8px;
             padding: 4px
         }
-
         #heatmap-height-line, #heatmap-info {
             text-decoration: #0366d6 dashed underline;
             cursor: pointer;
             font-family: monospace
         }
-
         #heatmap-info {
             cursor: help
         }
-
         #heatmap-info:hover + #info-tooltip {
             display: block
         }
-
         .colortip {
             width: 100px;
             box-sizing: border-box;
             padding: 4px;
             background: linear-gradient(var(--c1), var(--c2))
         }
-
-        /*end if heatmap css*/
+        .status {
+            position:fixed;
+            bottom: 0;
+            padding: 2px 4px;
+            background-color: #ffffe0;
+            border-top: 1px solid #ffc000;
+            border-left: 1px solid #ffc000;
+            border-right: 1px solid #ffc000;
+        }
     </style>
 </head>
 <body style='font: 12px Verdana, sans-serif'>
-
-/*if heatmap html:*/
 <div style="display: flex">
-    <script>
-        'use strict';
-        performance.mark('beforeLoad');
-    </script>
     <div style="width: 20px; margin-right: 2px; float: left; writing-mode: vertical-rl; transform: scale(-1); text-align: center; user-select: none">
         <pre id="heatmap-height-line"> 1 sec : 20 ms </pre>
     </div>
@@ -188,8 +163,7 @@
         <div id='rightMiddleDiff' class='selectionPart left'><span></span></div>
     </div>
 
-    <div id="heatmap-info"
-         style="width: 20px; margin-right: 2px; writing-mode: vertical-rl; text-align: center; user-select: none">
+    <div id="heatmap-info" style="width: 20px; margin-right: 2px; writing-mode: vertical-rl; text-align: center; user-select: none">
         <pre> Info </pre>
     </div>
     <div id="info-tooltip">
@@ -224,26 +198,16 @@
 <div style="display:none">
     <pre id="methods">/*methods:*/</pre>
 </div>
-<span style="position:fixed; bottom: 0; right:0; padding: 2px 4px; background-color: #ffffe0; border-top: 1px solid #ffc000; border-left: 1px solid #ffc000; border-top-left-radius: 4px;"><span
-        id="produced">Produced by <a href='https://github.com/jvm-profiling-tools/async-profiler'>async-profiler</a>&nbsp;</span><span
-        id='match' style="display: none">Matched: <span id='matchval'></span>&nbsp;<span id='reset' title='Clear'>&#x274c;</span></span></span>
-/*end if heatmap html*/
+<span class="status" style="border-right: none; border-top-left-radius: 4px; right:0;">
+    <span id="produced">Produced by <a href='https://github.com/jvm-profiling-tools/async-profiler'>async-profiler</a>&nbsp;</span>
+    <span id='match' style="display: none">Matched: <span id='matchval'></span>&nbsp;<span id='reset' title='Clear'>&#x274c;</span></span>
+</span>
 <h1 id="title">/*title:*/</h1>
-/*if flamegraph html:*/
-<header style='text-align: left'>
-    <button id='reverse' title='Reverse'>&#x1f53b;</button>&nbsp;&nbsp;<button id='search' title='Search'>&#x1f50d;
-</button>
-</header>
-<header style='text-align: right'>Produced by <a href='https://github.com/jvm-profiling-tools/async-profiler'>async-profiler</a>
-</header>
-<!-- TODO return match here -->
-/*end if flamegraph html*/
 <canvas id='canvas'></canvas>
 <div id='hl'><span></span></div>
 <div id='preview_wrapper'><canvas id='preview'></canvas></div>
 
-<span id='status'
-      style="position:fixed; bottom: 0; left:0; padding: 2px 4px; background-color: #ffffe0; border-top: 1px solid #ffc000; border-right: 1px solid #ffc000; border-top-right-radius: 4px; display: none">&nbsp;</span>
+<span id='status' class="status" style="border-left: none; border-top-right-radius: 4px; display: none; left:0;">&nbsp;</span>
 <script>
     // Copyright 2020 Andrei Pangin
     // Licensed under the Apache License, Version 2.0.
@@ -276,11 +240,8 @@
     setH(0.4);
 
     let root, rootLevel, px, pattern;
-    let reverse = /*reverse:*/false;
-    const levels = Array(/*depth:*/0);
-    for (let h = 0; h < levels.length; h++) {
-        levels[h] = [];
-    }
+    let reverse = true;
+    const levels = [];
 
     const canvas = document.getElementById('canvas');
     let c = canvas.getContext('2d');
@@ -312,13 +273,6 @@
     function getColor(p) {
         const v = Math.random();
         return '#' + (p[0] + ((p[1] * v) << 16 | (p[2] * v) << 8 | (p[3] * v))).toString(16);
-    }
-
-    function f(level, left, width, type, title, inln, c1, int) {
-        levels[level].push({
-            left: left, width: width, color: getColor(palette[type]), title: title,
-            details: (int ? ', int=' + int : '') + (c1 ? ', c1=' + c1 : '') + (inln ? ', inln=' + inln : '')
-        });
     }
 
     function samples(n) {
@@ -607,29 +561,6 @@
         search(false);
     }
 
-    /*if flamegraph js:*/
-
-    document.getElementById('search').onclick = function () {
-        search(true);
-    }
-
-    function searchSimple(r) {
-        if (r && (r = prompt('Enter regexp to search:', '')) === null) {
-            return;
-        }
-
-        pattern = r ? RegExp(r) : undefined;
-        const matched = render(root, rootLevel);
-        document.getElementById('matchval').textContent = pct(matched, root.width) + '%';
-        document.getElementById('match').style.display = r ? 'inherit' : 'none';
-    }
-
-    document.getElementById('reverse').onclick = function () {
-        reverse = !reverse;
-        render();
-    }
-    /*end if flamegraph js*/
-    /*if heatmap js:*/
     class DataBuffer {
         data;
         pos = 0;
@@ -701,23 +632,6 @@
 
     }
 
-    const hist = new Map();
-
-    function histogram(name, id) {
-        let m = hist.get(name);
-        if (m === undefined) {
-            m = new Map();
-            hist.set(name, m);
-        }
-        m.set(id, (m.get(id) || 0) + 1);
-    }
-
-    function printHistogram() {
-        hist.forEach((v, k) => {
-            console.log(k, [...v].sort((a, b) => b[1] - a[1]));
-        })
-    }
-
     function decodeExecutions(data) {
         const samplesCount = data.int30(-1);
         const uniqueChunksCount = data.int30(-2);
@@ -753,7 +667,6 @@
         const maxCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount, zoomToGroupSize.length);
         const searchMaxCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 4 * zoomToGroupSize.length, zoomToGroupSize.length);
 
-        console.log("huffmanStart", data.pos);
         const huffmanTableSize = data.nextVarInt();
         const huffmanMaxBits = data.nextVarInt();
 
@@ -763,8 +676,6 @@
             huffmanValues[i] = data.nextVarInt();
             huffmanCounts[data.nextVarInt()]++;
         }
-
-        console.log("huffmanDataStart", data.pos);
 
         let firstHuffmanCodeForCount = 0;
         let currentHuffmanCode = 0;
@@ -801,16 +712,12 @@
                 }
             }
         }
-        console.log("huffmanEnd", data.pos);
-
-        let perf = performance.now();
 
         let synonymsCount = data.nextVarInt();
         const synonyms = new Uint32Array(synonymsCount);
         for (let i = 0; i < synonymsCount; i++) {
             synonyms[i] = data.nextVarInt();
         }
-        console.log("synonyms", data.pos);
 
         let lz78LastRecordIndex = 0;
 
@@ -844,20 +751,14 @@
             lz78Parents[lz78LastRecordIndex] = lzPrevRecordId;
             lz78Sizes[lz78LastRecordIndex] = lz78Sizes[lzPrevRecordId] + 1;
         }
-        console.log("lz78", data.pos);
-
-        console.log("lz78", performance.now() - perf);
-        perf = performance.now();
 
         synonymsCount = data.nextVarInt();
         for (let i = 0; i < synonymsCount; i++) {
             synonyms[i] = data.nextVarInt();
         }
-        console.log("synonyms", data.pos);
 
         let sample = 0;
         let uniqueChunkIndex = 0;
-        console.log("chunks start", data.pos);
         for (let chunk = 0; chunk < chunksCount; chunk++) {
             const chunkId = data.nextVarInt();
             const recordId = (chunkId < synonymsCount ? synonyms[chunkId] : chunkId) - synonymsCount;
@@ -881,17 +782,9 @@
                 sample++;
             }
         }
-        console.log("samples", data.pos);
-        console.log("uniqueChunkIndex", uniqueChunkIndex);
         sampleToChunkEnds[sample - 1] = chunksCount;
 
-        console.log("tails", performance.now() - perf);
-        perf = performance.now();
-
         chunksOrderPacked.sort();
-
-        console.log("chunksReorder", performance.now() - perf);
-        perf = performance.now();
 
         const refs = lz78RootMethods;    // no need for them anymore
         refs.fill(0);
@@ -937,8 +830,6 @@
             chunksToStorage[chunkIndex] = refs[recordId];
         }
 
-        console.log("storage", performance.now() - perf);
-        perf = performance.now();
         return {
             sampleToChunkEnds: sampleToChunkEnds,
             chunksToStorage: chunksToStorage,
@@ -1051,7 +942,7 @@
     const canvasScrollPadding = 200;
     let canvasTimeHeight = 12;
     let canvasTimeHeightPx = 12;
-    let startMs = /*startMs:*/0;    // TODO put into data
+    let startMs = /*startMs:*/0;
 
     const zoomToGroupSize = [
         1,              // 20 ms
@@ -2576,11 +2467,7 @@
         }
     };
 
-    /*end if heatmap js*/
-    /*frames:*/
-    performance.mark('beforeInit');
     init();
-    performance.mark('beforeExit');
     // FIXME search(/*highlight:*/);
 </script>
 </body>

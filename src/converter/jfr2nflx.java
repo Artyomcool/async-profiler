@@ -22,6 +22,7 @@ import one.jfr.event.Event;
 import one.jfr.event.EventAggregator;
 import one.jfr.event.ExecutionSample;
 import one.proto.Proto;
+import one.util.Frames;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -149,7 +150,7 @@ public class jfr2nflx {
         byte[] className = jfr.symbols.get(cls.name);
         byte[] methodName = jfr.symbols.get(method.name);
 
-        if ((methodType >= FlameGraph.FRAME_NATIVE && methodType <= FlameGraph.FRAME_KERNEL)
+        if ((methodType >= Frames.FRAME_NATIVE && methodType <= Frames.FRAME_KERNEL)
                 || className == null || className.length == 0) {
             return methodName;
         } else {

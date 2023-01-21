@@ -1,9 +1,11 @@
+package one.heatmap;
+
 import java.util.Arrays;
 import java.util.PriorityQueue;
 
 public class HuffmanEncoder {
 
-    private long[] decodeTable;   // 8 bit for bits count, 56 value
+    private final long[] decodeTable;   // 8 bit for bits count, 56 value
     private final long[] encodeTable;   // 8 bit for bits count, 56 bits
 
     private int data;
@@ -31,7 +33,7 @@ public class HuffmanEncoder {
             minHeap.add(new Node(left, right));
         }
 
-        decodeTable = new long[maxFrequencyIndex + 1];
+        long[] decodeTable = new long[maxFrequencyIndex + 1];
         minHeap.remove().fillTable(decodeTable, 0);
         Arrays.sort(decodeTable);
         for (int i = 0; i < decodeTable.length; i++) {
@@ -44,6 +46,7 @@ public class HuffmanEncoder {
                 break;
             }
         }
+        this.decodeTable = decodeTable;
 
         encodeTable = new long[maxFrequencyIndex + 1];
         encodeTable[(int)decodeTable[0]] = decodeTable[0] & 0xFF00_0000_0000_0000L;

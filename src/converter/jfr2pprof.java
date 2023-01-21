@@ -15,12 +15,13 @@
  */
 
 import one.jfr.ClassRef;
-import one.jfr.Dictionary;
+import one.util.Dictionary;
 import one.jfr.JfrReader;
 import one.jfr.MethodRef;
 import one.jfr.StackTrace;
 import one.jfr.event.ExecutionSample;
 import one.proto.Proto;
+import one.util.Frames;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -195,7 +196,7 @@ public class jfr2pprof {
         final byte[] className = reader.symbols.get(classRef.name);
         final byte[] methodName = reader.symbols.get(ref.name);
 
-        if ((methodType >= FlameGraph.FRAME_NATIVE && methodType <= FlameGraph.FRAME_KERNEL) || className == null || className.length == 0) {
+        if ((methodType >= Frames.FRAME_NATIVE && methodType <= Frames.FRAME_KERNEL) || className == null || className.length == 0) {
             // Native method
             return methodName;
         } else {

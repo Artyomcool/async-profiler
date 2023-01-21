@@ -1,3 +1,5 @@
+package one.heatmap;
+
 import java.util.Arrays;
 
 public class SampleList {
@@ -30,8 +32,7 @@ public class SampleList {
         data[recordsCount++] = (long) currentTimeBlock << 32L | stackId;
     }
 
-    public Result destoyForSamples() {
-        // TODO parallel and maybe enforce timsort
+    public Result samples() {
         Arrays.sort(data, 0, recordsCount);
 
         int firstBlockId = (int) (data[0] >> 32);
@@ -63,10 +64,6 @@ public class SampleList {
             currentBlockSize++;
             stackIds[stackIdsPos++] = (int) (currentData & 0xFFFFFFFFL) - 1;
         }
-
-        System.out.println(stackIdsPos + " " + stackIds.length);
-
-        data = null;    // don`t hold such huge reference longer then we need
 
         return new Result(blockSizes, stackIds);
     }

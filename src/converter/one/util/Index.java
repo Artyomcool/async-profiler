@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package one.jfr;
+package one.util;
 
 /**
  * Fast and compact Object->int map.

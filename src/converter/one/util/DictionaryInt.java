@@ -14,46 +14,42 @@
  * limitations under the License.
  */
 
-package one.jfr;
+package one.util;
 
 /**
- * Fast and compact long->Object map.
+ * Fast and compact long->long map.
  */
-public class MethodsDictionary {
-/*
-    private static final int INITIAL_CAPACITY = 1024 * 1024;
+public class DictionaryInt {
+    private static final int INITIAL_CAPACITY = 16;
 
-    private Dictionary<MethodRef> methodRefs;
-    private Dictionary<ClassRef> classRefs;
-    private Dictionary<byte[]> symbols;
+    private long[] keys;
+    private int[] values;
+    private int size;
 
-    private long[] packedMethodsData;
-    private int size = 0;
-
-    public MethodsDictionary() {
-        this(INITIAL_CAPACITY);
+    public DictionaryInt() {
+        this.keys = new long[INITIAL_CAPACITY];
+        this.values = new int[INITIAL_CAPACITY];
     }
 
-    public MethodsDictionary(int capacity) {
-        this.packedMethodsData = new long[capacity * 4];
+    public void clear() {
+        keys = new long[INITIAL_CAPACITY];
+        values = new int[INITIAL_CAPACITY];
+        size = 0;
     }
 
-    public int getOrCreate(long originalMethodId, byte type, int location, boolean start) {
-        int mask = packedMethodsData.length / 4 - 1;
-        int i = hashCode(originalMethodId) & mask;
-        while (true) {
-            int pos = i * 4;
-            long originalMethod = packedMethodsData[pos];
-            if (originalMethod == 0) {
-                break;
-            }
-            if (originalMethod != originalMethodId) {
-                i = (i + 1) & mask;
-                continue;
-            }
+    public void put(long key, int value) {
+        if (key == 0) {
+            throw new IllegalArgumentException("Zero key not allowed");
+        }
 
-            int t = pos;
-
+        int mask = keys.length - 1;
+        int i = hashCode(key) & mask;
+        while (keys[i] != 0) {
+            if (keys[i] == key) {
+                values[i] = value;
+                return;
+            }
+            i = (i + 1) & mask;
         }
         keys[i] = key;
         values[i] = value;
@@ -63,8 +59,7 @@ public class MethodsDictionary {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    public T putIfAbsent(long key, T value) {
+    public int putIfAbsent(long key, int value) {
         if (key == 0) {
             throw new IllegalArgumentException("Zero key not allowed");
         }
@@ -73,7 +68,7 @@ public class MethodsDictionary {
         int i = hashCode(key) & mask;
         while (keys[i] != 0) {
             if (keys[i] == key) {
-                return (T) values[i];
+                return values[i];
             }
             i = (i + 1) & mask;
         }
@@ -83,71 +78,37 @@ public class MethodsDictionary {
         if (++size * 2 > keys.length) {
             resize(keys.length * 2);
         }
-        return null;
+        return value;
     }
 
-    @SuppressWarnings("unchecked")
-    public T get(long key) {
-        int mask = keys.length - 1;
-        int i = hashCode(key) & mask;
-        while (keys[i] != key && keys[i] != 0) {
-            i = (i + 1) & mask;
-        }
-        return (T) values[i];
-    }
-
-    @SuppressWarnings("unchecked")
-    public T getOrCreate(long key, Initializer<? extends T> initializer) {
-        if (key == 0) {
-            throw new IllegalArgumentException("Zero key not allowed");
-        }
-
-        int mask = keys.length - 1;
-        int i = hashCode(key) & mask;
-        while (keys[i] != 0) {
-            if (keys[i] == key) {
-                return (T) values[i];
-            }
-            i = (i + 1) & mask;
-        }
-        T result = initializer.createForEmpty();
-        keys[i] = key;
-        values[i] = result;
-
-        if (++size * 2 > keys.length) {
-            resize(keys.length * 2);
-        }
-        return result;
-    }
-
-    @SuppressWarnings("unchecked")
-    public T getOrDefault(long key, T def) {
+    public int get(long key) {
         int mask = keys.length - 1;
         int i = hashCode(key) & mask;
         while (keys[i] != key) {
             if (keys[i] == 0) {
-                return def;
+                throw new IllegalArgumentException("No such key: " + key);
             }
             i = (i + 1) & mask;
         }
-        return (T) values[i];
+        return values[i];
     }
 
-    @SuppressWarnings("unchecked")
-    public T getFirst() {
-        for (int i = 0; i < keys.length; i++) {
-            if (keys[i] != 0) {
-                return (T) values[i];
+    public int get(long key, int notFound) {
+        int mask = keys.length - 1;
+        int i = hashCode(key) & mask;
+        while (keys[i] != key) {
+            if (keys[i] == 0) {
+                return notFound;
             }
+            i = (i + 1) & mask;
         }
-        return null;
+        return values[i];
     }
 
-    @SuppressWarnings("unchecked")
-    public void forEach(Visitor<T> visitor) {
+    public void forEach(Visitor visitor) {
         for (int i = 0; i < keys.length; i++) {
             if (keys[i] != 0) {
-                visitor.visit(keys[i], (T) values[i]);
+                visitor.visit(keys[i], values[i]);
             }
         }
     }
@@ -165,7 +126,7 @@ public class MethodsDictionary {
 
     private void resize(int newCapacity) {
         long[] newKeys = new long[newCapacity];
-        Object[] newValues = new Object[newCapacity];
+        int[] newValues = new int[newCapacity];
         int mask = newKeys.length - 1;
 
         for (int i = 0; i < keys.length; i++) {
@@ -189,12 +150,7 @@ public class MethodsDictionary {
         return (int) (key ^ (key >>> 32));
     }
 
-    public interface Visitor<T> {
-        void visit(long key, T value);
+    public interface Visitor {
+        void visit(long key, int value);
     }
-
-    public interface Initializer<T> {
-        T createForEmpty();
-    }
-*/
 }

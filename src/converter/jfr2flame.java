@@ -15,11 +15,12 @@
  */
 
 import one.jfr.ClassRef;
-import one.jfr.Dictionary;
+import one.util.Dictionary;
 import one.jfr.JfrReader;
 import one.jfr.MethodRef;
 import one.jfr.StackTrace;
 import one.jfr.event.*;
+import one.util.Frames;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -166,8 +167,8 @@ public class jfr2flame {
     }
 
     private boolean isNativeFrame(byte methodType) {
-        return methodType >= FlameGraph.FRAME_NATIVE && methodType <= FlameGraph.FRAME_KERNEL
-                && jfr.frameTypes.size() > FlameGraph.FRAME_NATIVE + 1;
+        return methodType >= Frames.FRAME_NATIVE && methodType <= Frames.FRAME_KERNEL
+                && jfr.frameTypes.size() > Frames.FRAME_NATIVE + 1;
     }
 
     private String toJavaClassName(byte[] symbol, int start, boolean dotted) {

@@ -1,8 +1,10 @@
+package one.util;
+
 import java.io.*;
 
 public class ResourceProcessor {
 
-    static String getResource(String name) {
+    public static String getResource(String name) {
         try (InputStream stream = ResourceProcessor.class.getResourceAsStream(name)) {
             if (stream == null) {
                 throw new IOException("No resource found");
@@ -19,15 +21,13 @@ public class ResourceProcessor {
         }
     }
 
-    static String printTill(PrintStream out, String data, String till) {
-        System.out.println("printTill " + till);
+    public static String printTill(PrintStream out, String data, String till) {
         int index = data.indexOf(till);
         out.print(data.substring(0, index));
         return data.substring(index + till.length());
     }
 
-    static String skipTill(String data, String till) {
-        System.out.println("skipTill " + till);
+    public static String skipTill(String data, String till) {
         return data.substring(data.indexOf(till) + till.length());
     }
 }

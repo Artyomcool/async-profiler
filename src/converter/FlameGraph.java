@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 
+import one.util.Frames;
+import one.util.ResourceProcessor;
+
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.io.Reader;
@@ -30,16 +31,9 @@ import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 public class FlameGraph extends ResourceProcessor {
-    public static final byte FRAME_INTERPRETED = 0;
-    public static final byte FRAME_JIT_COMPILED = 1;
-    public static final byte FRAME_INLINED = 2;
-    public static final byte FRAME_NATIVE = 3;
-    public static final byte FRAME_CPP = 4;
-    public static final byte FRAME_KERNEL = 5;
-    public static final byte FRAME_C1_COMPILED = 6;
 
     private final Arguments args;
-    private final Frame root = new Frame(FRAME_NATIVE);
+    private final Frame root = new Frame(Frames.FRAME_NATIVE);
     private int depth;
     private long mintotal;
 
@@ -129,7 +123,7 @@ public class FlameGraph extends ResourceProcessor {
 
     private void printFrame(PrintStream out, String title, Frame frame, int level, long x) {
         int type = frame.getType();
-        if (type == FRAME_KERNEL) {
+        if (type == Frames.FRAME_KERNEL) {
             title = stripSuffix(title);
         }
 
@@ -213,11 +207,11 @@ public class FlameGraph extends ResourceProcessor {
 
         byte getType() {
             if (inlined * 3 >= total) {
-                return FRAME_INLINED;
+                return Frames.FRAME_INLINED;
             } else if (c1 * 2 >= total) {
-                return FRAME_C1_COMPILED;
+                return Frames.FRAME_C1_COMPILED;
             } else if (interpreted * 2 >= total) {
-                return FRAME_INTERPRETED;
+                return Frames.FRAME_INTERPRETED;
             } else {
                 return type;
             }
@@ -236,22 +230,22 @@ public class FlameGraph extends ResourceProcessor {
 
             Frame child;
             if (title.endsWith("_[j]")) {
-                child = getChild(stripSuffix(title), FRAME_JIT_COMPILED);
+                child = getChild(stripSuffix(title), Frames.FRAME_JIT_COMPILED);
             } else if (title.endsWith("_[i]")) {
-                (child = getChild(stripSuffix(title), FRAME_JIT_COMPILED)).inlined += ticks;
+                (child = getChild(stripSuffix(title), Frames.FRAME_JIT_COMPILED)).inlined += ticks;
             } else if (title.endsWith("_[k]")) {
-                child = getChild(title, FRAME_KERNEL);
+                child = getChild(title, Frames.FRAME_KERNEL);
             } else if (title.endsWith("_[1]")) {
-                (child = getChild(stripSuffix(title), FRAME_JIT_COMPILED)).c1 += ticks;
+                (child = getChild(stripSuffix(title), Frames.FRAME_JIT_COMPILED)).c1 += ticks;
             } else if (title.endsWith("_[0]")) {
-                (child = getChild(stripSuffix(title), FRAME_JIT_COMPILED)).interpreted += ticks;
+                (child = getChild(stripSuffix(title), Frames.FRAME_JIT_COMPILED)).interpreted += ticks;
             } else if (title.contains("::") || title.startsWith("-[") || title.startsWith("+[")) {
-                child = getChild(title, FRAME_CPP);
+                child = getChild(title, Frames.FRAME_CPP);
             } else if (title.indexOf('/') > 0 && title.charAt(0) != '['
                     || title.indexOf('.') > 0 && Character.isUpperCase(title.charAt(0))) {
-                child = getChild(title, FRAME_JIT_COMPILED);
+                child = getChild(title, Frames.FRAME_JIT_COMPILED);
             } else {
-                child = getChild(title, FRAME_NATIVE);
+                child = getChild(title, Frames.FRAME_NATIVE);
             }
             return child;
         }

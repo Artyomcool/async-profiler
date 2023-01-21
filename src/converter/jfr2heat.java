@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import one.heatmap.Heatmap;
 import one.jfr.JfrReader;
 import one.jfr.event.AllocationSample;
 import one.jfr.event.ContendedLock;
@@ -25,7 +26,7 @@ import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Converts .jfr output produced by async-profiler to HTML Heatmap.
+ * Converts .jfr output produced by async-profiler to HTML one.heatmap.Heatmap.
  */
 public class jfr2heat {
 
@@ -48,7 +49,7 @@ public class jfr2heat {
         long startNanos = Long.MAX_VALUE;
 
         long startTime = System.nanoTime();
-        final Heatmap heatmap = new Heatmap("Heatmap, " + (alloc ? "Alloc" : "CPU"), 20);
+        final Heatmap heatmap = new Heatmap("one.heatmap.Heatmap, " + (alloc ? "Alloc" : "CPU"), 20);
         for (String file : input.split(",")) {
             heatmap.nextFile();
 

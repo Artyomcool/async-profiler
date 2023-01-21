@@ -1,13 +1,14 @@
-import one.jfr.Dictionary;
+package one.heatmap;
 
-class Method {
+public class Method {
+
+    public final int className;
+    public final int methodName;
+    public final int location;
+    public final byte type;
+    public final boolean start;
 
     final long originalMethodId;
-    final int className;
-    final int methodName;
-    final int location;
-    final byte type;
-    final boolean start;
 
     Method next;
 

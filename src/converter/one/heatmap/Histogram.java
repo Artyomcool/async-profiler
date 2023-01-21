@@ -1,11 +1,13 @@
+package one.heatmap;
+
 import java.util.Map;
 import java.util.TreeMap;
 
-class Histogram {
+public class Histogram {
     private static final int COUNT = 1000;
-    Map<String, int[]> data = new TreeMap<>();
+    private final Map<String, int[]> data = new TreeMap<>();
 
-    void add(int value, String name) {
+    public void add(int value, String name) {
         int[] histogram = data.get(name);
         if (histogram == null) {
             histogram = new int[COUNT + 1];
@@ -21,7 +23,7 @@ class Histogram {
         histogram[COUNT]++;
     }
 
-    void print() {
+    public void print() {
         for (Map.Entry<String, int[]> kv : data.entrySet()) {
             String name = kv.getKey();
             int[] histogram = kv.getValue();
@@ -32,7 +34,7 @@ class Histogram {
                     count = i + 1;
                 }
             }
-            System.out.println("Histogram " + name + ": ");
+            System.out.println("one.heatmap.Histogram " + name + ": ");
             int nowCount = 0;
             for (int i = 1; i < count; i++) {
                 int c = histogram[i];

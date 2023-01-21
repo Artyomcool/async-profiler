@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package one.jfr;
+package one.util;
 
 import java.util.Arrays;
 
@@ -63,29 +63,6 @@ public class Dictionary<T> {
         if (++size * 2 > keys.length) {
             resize(keys.length * 2);
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    public T putIfAbsent(long key, T value) {
-        if (key == 0) {
-            throw new IllegalArgumentException("Zero key not allowed");
-        }
-
-        int mask = keys.length - 1;
-        int i = hashCode(key) & mask;
-        while (keys[i] != 0) {
-            if (keys[i] == key) {
-                return (T) values[i];
-            }
-            i = (i + 1) & mask;
-        }
-        keys[i] = key;
-        values[i] = value;
-
-        if (++size * 2 > keys.length) {
-            resize(keys.length * 2);
-        }
-        return null;
     }
 
     @SuppressWarnings("unchecked")

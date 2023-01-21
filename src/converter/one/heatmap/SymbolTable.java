@@ -1,4 +1,4 @@
-package one.jfr;
+package one.heatmap;
 
 import java.util.Arrays;
 

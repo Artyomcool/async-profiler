@@ -1,4 +1,4 @@
-package one.jfr;
+package one.heatmap;
 
 import java.util.Arrays;
 
@@ -98,11 +98,8 @@ public class StackStorage {
         return size;
     }
 
-    public int[][] destroyForOrderedTraces() {
-        int[][] result = Arrays.copyOf(values, size);
-        meta = null;
-        values = null;
-        return result;
+    public int[][] orderedTraces() {
+        return Arrays.copyOf(values, size);
     }
 
     protected void resize(int newCapacity) {

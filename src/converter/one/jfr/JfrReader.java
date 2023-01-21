@@ -16,6 +16,7 @@
 
 package one.jfr;
 
+import one.util.Dictionary;
 import one.jfr.event.*;
 
 import java.io.Closeable;
