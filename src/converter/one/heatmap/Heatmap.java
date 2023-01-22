@@ -121,127 +121,84 @@ public class Heatmap extends ResourceProcessor {
         wasPos = debugStep("stack sizes", out, wasPos, veryStart);
 
         // NOTE: destroys internal state!
-        context.nodeTree.calculateSynonyms();
+        SynonymTable synonymTable = context.nodeTree.extractSynonymTable();
+        synonymTable.calculateSynonyms();
         // writes frequent lz tree nodes as a synonyms table
-        writeTreeSynonyms(out, context);
+        writeSynonymsTable(out, synonymTable);
         wasPos = debugStep("tree synonyms", out, wasPos, veryStart);
 
         // writes lz tree with two pairs of var-ints: [parent node id] + [method id of this node]
-        writeTree(out, context);
+        writeTree(out, synonymTable, context);
         wasPos = debugStep("tree body", out, wasPos, veryStart);
 
         // calculate counts for the next synonyms table, that will be used for samples
-        int chunksCount = calculateAndWriteSamplesSynonyms(context, stackChunksBuffer);
+        int chunksCount = calculateSamplesSynonyms(synonymTable, context, stackChunksBuffer);
         // writes frequent lz tree nodes as a synonyms table (for sample chunks)
-        writeTreeSynonyms(out, context);
+        writeSynonymsTable(out, synonymTable);
         wasPos = debugStep("samples synonyms", out, wasPos, veryStart);
 
         // writes sample chunks as var-ints references for [node id]
-        writeSamples(out, context, stackChunksBuffer);
+        writeSamples(out, synonymTable, context, stackChunksBuffer);
         debugStep("samples body", out, wasPos, veryStart);
-
-        // calculates amount of storage needed for unpacking samples
-        long storageSize = calculateStorageSizeAndUniqueNodes(context);
-        // FIXME something wrong with storage size!!!
-        System.out.println("storageSize " + (storageSize >> 32) * 4 / 1024.0 / 1024.0 + " MB (" + (storageSize >> 32) + ")");
 
         out.write30(context.nodeTree.nodesCount());
         out.write30(context.sampleList.blockSizes.length);
-        out.write30((int) (storageSize >> 32));
+        out.write30(context.nodeTree.storageSize());
         out.write30(chunksCount);
-        out.write30((int) storageSize);  // unique chunks
         out.write30(context.sampleList.stackIds.length);
 
         histogram.print();
     }
 
-    private long calculateStorageSizeAndUniqueNodes(EvaluationContext context) {
-        int storageSize = 0;
-        int uniqueCount = 0;
-        long[] parentsWithSizes = context.nodeTree.nodesParentsWithSizes();
-        Arrays.sort(parentsWithSizes, 1, context.nodeTree.nodesCount());
-
-        for (int i = context.nodeTree.nodesCount() - 1; i > 0; i--) {
-            long c = parentsWithSizes[i];
-            if (c < 0) {
-                break;
-            }
-            uniqueCount++;
-            if (c == 0) {
-                continue;
-            }
-
-            int count = (int) (c >> 32);
-            storageSize += count;
-
-            parentsWithSizes[i] = 0;
-
-            int p = (int) c;
-            do {
-                c = parentsWithSizes[p];
-                parentsWithSizes[p] = 0;
-                p = (int) c;
-            } while (p != 0);
-        }
-        return (long) storageSize << 32 | uniqueCount;
-    }
-
-    private void writeSamples(HtmlOut out, EvaluationContext context, int[] stackChunksBuffer) throws IOException {
+    private void writeSamples(HtmlOut out, SynonymTable synonymTable, EvaluationContext context, int[] stackChunksBuffer) throws IOException {
         for (int stackId : context.sampleList.stackIds) {
             int chunksStart = stackChunksBuffer[stackId * 2];
             int chunksEnd = stackChunksBuffer[stackId * 2 + 1];
 
-            long[] parentsWithSizes = context.nodeTree.nodesParentsWithSizes();
             for (int i = chunksStart; i < chunksEnd; i++) {
                 int nodeId = stackChunksBuffer[i];
-                parentsWithSizes[nodeId] &= 0x7FFF_FFFF_FFFF_FFFFL;
-                out.writeVar(context.nodeTree.nodeIdOrSynonym(nodeId));
+                context.nodeTree.markUsed(nodeId);
+                out.writeVar(synonymTable.nodeIdOrSynonym(nodeId));
             }
         }
     }
 
-    private int calculateAndWriteSamplesSynonyms(EvaluationContext context, int[] stackChunksBuffer) {
+    private int calculateSamplesSynonyms(SynonymTable synonymTable, EvaluationContext context, int[] stackChunksBuffer) {
         int chunksCount = 0;
-        int[] nodeCounts = context.nodeTree.nodesCounts();
-        Arrays.fill(nodeCounts, 0, context.nodeTree.nodesCount(), 0);
+        int[] childrenCount = synonymTable.reset();
 
         for (int stackId : context.sampleList.stackIds) {
             int chunksStart = stackChunksBuffer[stackId * 2];
             int chunksEnd = stackChunksBuffer[stackId * 2 + 1];
 
             for (int i = chunksStart; i < chunksEnd; i++) {
-                nodeCounts[stackChunksBuffer[i]]--; // negation for reverse sort
+                childrenCount[stackChunksBuffer[i]]--; // negation for reverse sort
                 chunksCount++;
             }
         }
 
-        context.nodeTree.calculateSynonyms();
+        synonymTable.calculateSynonyms();
         return chunksCount;
     }
 
-    private void writeTree(HtmlOut out, EvaluationContext context) throws IOException {
-        long[] data = context.nodeTree.data();
-        for (int i = 0; i < context.nodeTree.nodesCount() - 1; i++) {
+    private void writeTree(HtmlOut out, SynonymTable synonymTable, EvaluationContext context) throws IOException {
+        long[] data = context.nodeTree.treeData();
+        int dataSize = context.nodeTree.treeDataSize();
+        for (int i = 0; i < dataSize; i++) {
             long d = data[i];
-            int parentId = (int) d;
-            int methodId = (int) (d >>> 32);
-            out.writeVar(context.nodeTree.nodeIdOrSynonym(parentId));
+            int parentId = context.nodeTree.extractParentId(d);
+            int methodId = context.nodeTree.extractMethodId(d);
+
+            out.writeVar(synonymTable.nodeIdOrSynonym(parentId));
             out.writeVar(context.orderedMethods[methodId - 1].frequencyOrNewMethodId);
         }
     }
 
-    private void writeTreeSynonyms(final HtmlOut out, EvaluationContext context) throws IOException {
-        out.writeVar(context.nodeTree.synonymsCount());
-        context.nodeTree.visitTreeNodeSynonyms(new LzNodeTree.SynonymVisitor() {
-            @Override
-            public void nextSynonym(int synonym) {
-                try {
-                    out.writeVar(synonym);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        });
+    private void writeSynonymsTable(HtmlOut out, SynonymTable synonymTable) throws IOException {
+        out.writeVar(synonymTable.synonymsCount());
+        for (int i = 0; i < synonymTable.synonymsCount(); i++) {
+            out.writeVar(synonymTable.synonymAt(i));
+        }
     }
 
     private void writeStartMethods(HtmlOut out, EvaluationContext context) throws IOException {
@@ -300,7 +257,7 @@ public class Heatmap extends ResourceProcessor {
                 stackBuffer[stackId * 2] = chunksIterator;  // start
 
                 for (int methodId : stack) {
-                    current = context.nodeTree.putIfAbsent(current, methodId);
+                    current = context.nodeTree.appendChild(current, methodId);
                     if (current == 0) { // so we are starting from root again, it will be written to output as Lz78 element - [parent node id; method id]
                         context.orderedMethods[methodId - 1].frequencyOrNewMethodId++;
                         if (stackBuffer.length == chunksIterator) {
@@ -320,7 +277,7 @@ public class Heatmap extends ResourceProcessor {
                 stackBuffer[stackId * 2 + 1] = chunksIterator;  // end
             } else { // general case
                 for (int methodId : stack) {
-                    current = context.nodeTree.putIfAbsent(current, methodId);
+                    current = context.nodeTree.appendChild(current, methodId);
                     if (current == 0) { // so we are starting from root again, it will be written to output as Lz78 element - [parent node id; method id]
                         context.orderedMethods[methodId - 1].frequencyOrNewMethodId++;
                     }

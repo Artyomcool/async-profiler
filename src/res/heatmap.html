@@ -634,11 +634,10 @@
 
     function decodeExecutions(data) {
         const samplesCount = data.int30(-1);
-        const uniqueChunksCount = data.int30(-2);
-        const chunksCount = data.int30(-3);
-        const storageSize = data.int30(-4);
-        const blocksCount = data.int30(-5);
-        const lz78RecordsCount = data.int30(-6);
+        const chunksCount = data.int30(-2);
+        const storageSize = data.int30(-3);
+        const blocksCount = data.int30(-4);
+        const lz78RecordsCount = data.int30(-5);
 
         const starts = new Set();
         const startMethodsCount = data.nextVarInt();
@@ -646,16 +645,13 @@
             starts.add(data.nextVarInt());
         }
 
-        let littleEndian = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
-
         // NOTE: All dynamic allocations should be done before this line
-        const buffer = new ArrayBuffer(8 * uniqueChunksCount + (4 + 4 + 4 + 2) * lz78RecordsCount);
-        const chunksOrderPacked = new BigUint64Array(buffer, 0, uniqueChunksCount);    // FIXME NOTE!!! parents in most cases takes only 3 bytes!
-        const chunksOrderView = new DataView(buffer, 0, uniqueChunksCount * 8);
-        const lz78RootMethods = new Uint32Array(buffer, uniqueChunksCount * 8, lz78RecordsCount);   // FIXME NOTE!!! methods in most cases takes only 2 bytes!
-        const lz78CurrentMethods = new Uint32Array(buffer, uniqueChunksCount * 8 + lz78RecordsCount * 4, lz78RecordsCount); // FIXME NOTE!!! methods in most cases takes only 2 bytes!
-        const lz78Parents = new Uint32Array(buffer, uniqueChunksCount * 8 + lz78RecordsCount * 8, lz78RecordsCount);    // FIXME NOTE!!! parents in most cases takes only 3 by
-        const lz78Sizes = new Uint16Array(buffer, uniqueChunksCount * 8 + lz78RecordsCount * 12, lz78RecordsCount);
+        const buffer = new ArrayBuffer((4 + 4 + 4 + 4 + 4) * lz78RecordsCount);
+        const lz78RootMethods = new Uint32Array(buffer, 0, lz78RecordsCount);   // FIXME NOTE!!! methods in most cases takes only 2 bytes!
+        const lz78CurrentMethods = new Uint32Array(buffer, lz78RecordsCount * 4, lz78RecordsCount); // FIXME NOTE!!! methods in most cases takes only 2 bytes!
+        const lz78Parents = new Uint32Array(buffer, lz78RecordsCount * 8, lz78RecordsCount);
+        const lz78Sizes = new Uint32Array(buffer, lz78RecordsCount * 12, lz78RecordsCount);
+        const lz78Refs = new Uint32Array(buffer, lz78RecordsCount * 16, lz78RecordsCount);
 
         const returnBuffer = new ArrayBuffer(4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 8 * zoomToGroupSize.length);
         const sampleToChunkEnds = new Uint32Array(returnBuffer, 0, samplesCount);  // FIXME NOTE!!! parents in most cases takes only 3 bytes!
@@ -746,7 +742,13 @@
             const lzPrevRecordId = (prevChunkId < synonymsCount ? synonyms[prevChunkId] : prevChunkId) - synonymsCount;
 
             lz78LastRecordIndex++
-            lz78RootMethods[lz78LastRecordIndex] = lz78RootMethods[lzPrevRecordId] || addMethodId;
+            // 0 bit for starts, 1 bit for leafs
+            const prevFlags = lz78RootMethods[lzPrevRecordId];
+            lz78RootMethods[lzPrevRecordId] = prevFlags & 1;   // not a leaf anymore
+            lz78RootMethods[lz78LastRecordIndex] = lzPrevRecordId === 0
+                ? (starts.has(addMethodId) ? 3 : 2)
+                : (prevFlags | 2);  // leaf for now
+
             lz78CurrentMethods[lz78LastRecordIndex] = addMethodId;
             lz78Parents[lz78LastRecordIndex] = lzPrevRecordId;
             lz78Sizes[lz78LastRecordIndex] = lz78Sizes[lzPrevRecordId] + 1;
@@ -758,24 +760,34 @@
         }
 
         let sample = 0;
-        let uniqueChunkIndex = 0;
+        let pos = 0;
         for (let chunk = 0; chunk < chunksCount; chunk++) {
             const chunkId = data.nextVarInt();
-            const recordId = (chunkId < synonymsCount ? synonyms[chunkId] : chunkId) - synonymsCount;
+            let recordId = (chunkId < synonymsCount ? synonyms[chunkId] : chunkId) - synonymsCount;
+            const flags = lz78RootMethods[recordId];
             chunksToStorage[chunk] = recordId;
-            if (lz78Sizes[recordId] !== 0) {
-                if (littleEndian) {
-                    chunksOrderView.setUint32(uniqueChunkIndex << 3, recordId, true);
-                    chunksOrderView.setUint32(uniqueChunkIndex << 3 | 4, lz78Sizes[recordId], true);
-                } else {
-                    chunksOrderView.setUint32(uniqueChunkIndex << 3 | 4, recordId, false);
-                    chunksOrderView.setUint32(uniqueChunkIndex << 3, lz78Sizes[recordId], false);
+            if (flags & 2) {    // leaf
+                const storagePos = lz78Refs[recordId];
+                const rid = recordId;
+                if (storagePos === 0) {
+                    let size = lz78Sizes[recordId];
+                    do {
+                        storageSizes[pos] = size--;
+                        storage[pos] = lz78CurrentMethods[recordId];
+                        pos++;
+                        lz78Refs[recordId] = pos;
+                        recordId = lz78Parents[recordId];
+                    } while (recordId !== 0 && lz78Refs[recordId] === 0);
+
+                    while (recordId !== 0) {
+                        storageSizes[pos] = size--;
+                        storage[pos] = lz78CurrentMethods[recordId];
+                        pos++;
+                        recordId = lz78Parents[recordId];
+                    }
                 }
-                lz78Sizes[recordId] = 0;
-                uniqueChunkIndex++;
             }
-            const rootMethod = lz78RootMethods[recordId];
-            if (starts.has(rootMethod)) {
+            if (flags & 1) {    // start of the next sample
                 if (sample !== 0) {
                     sampleToChunkEnds[sample - 1] = chunk;
                 }
@@ -784,51 +796,11 @@
         }
         sampleToChunkEnds[sample - 1] = chunksCount;
 
-        chunksOrderPacked.sort();
-
-        const refs = lz78RootMethods;    // no need for them anymore
-        refs.fill(0);
-
-        let pos = 0;
-        for (let ci = uniqueChunkIndex - 1; ci >= 0; ci--) {
-            let recordId = littleEndian
-                ? chunksOrderView.getUint32(ci << 3, true)
-                : chunksOrderView.getUint32(ci << 3 | 4, false);
-
-            if (refs[recordId] !== 0) {
-                continue;
-            }
-
-            let size = littleEndian
-                ? chunksOrderView.getUint32(ci << 3 | 4, true)
-                : chunksOrderView.getUint32(ci << 3, false);
-
-            //console.log(recordId, size, pos);
-            do {
-                refs[recordId] = pos;
-                if (pos === storage.length) {
-                    throw "hh";
-                }
-                storageSizes[pos] = size--;
-                storage[pos++] = lz78CurrentMethods[recordId];
-                recordId = lz78Parents[recordId];
-            } while (recordId !== 0 && refs[recordId] === 0);
-
-            while (recordId !== 0) {
-                if (pos === storage.length) {
-                    throw "hh2";
-                }
-                storageSizes[pos] = size--;
-                storage[pos++] = lz78CurrentMethods[recordId];
-                recordId = lz78Parents[recordId];
-            }
+        for (let chunk = 0; chunk < chunksCount; chunk++) {
+            const recordId = chunksToStorage[chunk];
+            chunksToStorage[chunk] = lz78Refs[recordId] - 1;
         }
-        console.log("storage size", pos);
 
-        for (let chunkIndex = 0; chunkIndex < chunksCount; chunkIndex++) {
-            let recordId = chunksToStorage[chunkIndex];
-            chunksToStorage[chunkIndex] = refs[recordId];
-        }
 
         return {
             sampleToChunkEnds: sampleToChunkEnds,
@@ -1878,8 +1850,7 @@
                             levels.push([{left: 0, width: 0, color: methods.c[0], title: methods.n[0]}]);
                         }
                         renderWithMatch(levels.length * 16, levels[0][0], 0);
-                        console.log("ALL PERF", pp);    //3911.299999922514 763.5999992787838 2337.800000876188
-                        return false;                               //4680.600000172853 794.4000008404255 3045.600001811981
+                        return false;
                     }
 
                     let level = new Array(roots.length);
