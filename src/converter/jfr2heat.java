@@ -49,7 +49,7 @@ public class jfr2heat {
         long startNanos = Long.MAX_VALUE;
 
         long startTime = System.nanoTime();
-        final Heatmap heatmap = new Heatmap("one.heatmap.Heatmap, " + (alloc ? "Alloc" : "CPU"), 20);
+        final Heatmap heatmap = new Heatmap("Heatmap, " + (alloc ? "Alloc" : "CPU"), 20);
         for (String file : input.split(",")) {
             heatmap.nextFile();
 

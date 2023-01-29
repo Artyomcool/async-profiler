@@ -29,7 +29,7 @@ public class SampleList {
         }
 
         int currentTimeBlock = (int) ((timeMs - initialTime) / blockDurationMs);
-        data[recordsCount++] = (long) currentTimeBlock << 32L | stackId;
+        data[recordsCount++] = (long) currentTimeBlock << 32 | stackId;
     }
 
     public Result samples() {
@@ -49,7 +49,7 @@ public class SampleList {
         int currentBlockId = firstBlockId;
 
 
-        a: while (true) {
+        a: while (stackIdsPos < stackIds.length) {
             long currentData = data[stackIdsPos];
             int blockId = (int) (currentData >> 32);
             while (currentBlockId != blockId) {
