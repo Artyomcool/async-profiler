@@ -240,13 +240,13 @@
                 break;
         }
     }
-    setH(5.8);
+    setH(0.4);
 
     dRdg = dR;
     dGdg = dG;
     dBdg = dB;
 
-    setH(4.2);
+    setH(2.4);
 
     dRdl = dR;
     dGdl = dG;
@@ -1291,13 +1291,27 @@
                 for (let root of roots) {
                     let color;
                     if (root.baseWidth === 0) {
-                        color = "#dac571";
-                    } else if (root.baseWidth >= root.width) {
+                        color = "#ffdd33";
+                    } else if (root.baseWidth === root.width) {
+                        color = '#66e0f0';
+                    } else if (root.baseWidth > root.width) {
                         const ratio = (root.baseWidth - root.width) / minDiff;
-                        color = 'rgb(' + (225 - 90 * ratio) + ',' + (250 - 90 * ratio) + ',' + 255 + ')';
+
+                        const ratioM = (ratio * 96 + 16) | 0;
+
+                        const C = 255 - Math.abs(255 - (ratioM << 1));
+                        const m = (255 - ratioM) - (C >> 1);
+
+                        color = 'rgb(' + (((dRdl * C) >> 8) + m) + ',' + (((dGdl * C) >> 8) + m) + ',' + (((dBdl * C) >> 8) + m) + ')';
                     } else {
                         const ratio = (root.width - root.baseWidth) / maxDiff;
-                        color = 'rgb(' + 255 + ',' + (225 - 180 * ratio) + ',' + (240 - 200 * ratio) + ')';
+
+                        const ratioM = (ratio * 96 + 16) | 0;
+
+                        const C = 255 - Math.abs(255 - (ratioM << 1));
+                        const m = (255 - ratioM) - (C >> 1);
+
+                        color = 'rgb(' + (((dRdg * C) >> 8) + m) + ',' + (((dGdg * C) >> 8) + m) + ',' + (((dBdg * C) >> 8) + m) + ')';
                     }
 
                     root.color = color;
