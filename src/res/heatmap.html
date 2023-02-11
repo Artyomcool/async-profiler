@@ -1509,8 +1509,6 @@
 
             if ((methodsBuffer[methodId] += count) === count) {
                 nextFrames[--methodsMapFirstPos] = methodId;
-            } else if (methodsMapFirstPos === nextFrames.length) {
-                throw [methodId, "4410b", ctx]
             }
             methodsBufferTheOnlyChunks[methodId]++;
 
@@ -1696,8 +1694,6 @@
 
             if (methodsBuffer[methodId]++ === 0) {
                 nextFrames[--methodsMapFirstPos] = methodId;
-            } else if (methodsMapFirstPos === nextFrames.length) {
-                throw [methodId, "4410b", ctx]
             }
             methodsBufferDirectSamples[methodId]++;
 
@@ -1756,9 +1752,6 @@
         let maxCount = 0;
         for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
             maxCount = Math.max(maxCount, methodsBuffer[nextFrames[i]]);
-        }
-        if (maxCount === 0) {
-            throw "123";
         }
 
         sort(nextFrames, methodsMapFirstPos, nextFrames.length, methodsBuffer, 1 << (31 - Math.clz32(maxCount)));
