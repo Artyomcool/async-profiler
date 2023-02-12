@@ -18,7 +18,7 @@ public class LzNodeTree {
     // nodeId -> lengthToRoot << 32 | NOT_VISITED_MARKER | parentNodeId
     private int[] lengthToRoot;
 
-    private int storageSize = 0;
+    private int storageSize = 1;
     private int nodesCount = 1;
 
     public LzNodeTree() {

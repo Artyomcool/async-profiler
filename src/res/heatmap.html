@@ -97,15 +97,15 @@
         #info-tooltip {
             display: none;
             position: absolute;
-            top: 100px;
-            right: 32px;
+            top: 10px;
+            right: 48px;
             width: 204px;
             border: 1px solid #666666;
             background: #ffffe0;
             border-radius: 8px;
             padding: 4px
         }
-        #heatmap-height-line, #heatmap-info {
+        #heatmap-height-line {
             text-decoration: #0366d6 dashed underline;
             cursor: pointer;
             font-family: monospace
@@ -113,8 +113,30 @@
         #heatmap-info {
             cursor: help
         }
-        #heatmap-info:hover + #info-tooltip {
+        #heatmap-info:hover ~ #info-tooltip {
             display: block
+        }
+        .toolbarIcon {
+            text-align: center;
+            line-height: 24px;
+            width: 24px;
+            height: 24px;
+            font-size: 18px;
+            margin-top: 4px;
+            margin-bottom: 4px;
+        }
+        .toolbarSelected {
+            background-color: #999999;
+            outline: 1px solid #666666;
+            border-radius: 4px;
+        }
+        .toolbarIcon:hover {
+            background-color: #ffffe0;
+            outline: 1px solid #ffc000;
+            border-radius: 4px;
+        }
+        .bordered {
+            outline: 1px solid #999999;
         }
         .colortip {
             width: 100px;
@@ -134,13 +156,13 @@
     </style>
 </head>
 <body style='font: 12px Verdana, sans-serif'>
-<div style="display: flex">
-    <div style="width: 20px; margin-right: 2px; float: left; writing-mode: vertical-rl; transform: scale(-1); text-align: center; user-select: none">
+<div class='bordered' style="display: flex">
+    <div class='bordered' style="width: 20px; margin-right: 1px; padding: 2px; float: left; background-color: #efefef; writing-mode: vertical-rl; transform: scale(-1); text-align: center; user-select: none">
         <pre id="heatmap-height-line"> 1 sec : 20 ms </pre>
     </div>
 
     <div id='heatmap-canvas-container' style="width: 100%; position: relative" autofocus>
-        <div id='heatmap-canvas-wrapper' style='overflow: hidden; width: 100%'>
+        <div id='heatmap-canvas-wrapper' style='overflow: hidden; width: 100%; font-size: 0; padding-bottom: 1px'>
             <canvas id='heatmap-canvas' style='height: 314px'></canvas>
         </div>
 
@@ -163,32 +185,38 @@
         <div id='rightMiddleDiff' class='selectionPart left'><span></span></div>
     </div>
 
-    <div id="heatmap-info" style="width: 20px; margin-right: 2px; writing-mode: vertical-rl; text-align: center; user-select: none">
-        <pre> Info </pre>
-    </div>
-    <div id="info-tooltip">
-        <div style="float:left">
-            <div style="padding: 4px;">Frame types:</div>
-            <div class="colortip" style="--c1:#b2e1b2;--c2:#c6f5c6">Interpreted</div>
-            <div class="colortip" style="--c1:#50e150;--c2:#6eff6e">JIT-Compiled</div>
-            <div class="colortip" style="--c1:#50cccc;--c2:#6eeaea">Inlined</div>
-            <div class="colortip" style="--c1:#e15a5a;--c2:#ff8282">Native</div>
-            <div class="colortip" style="--c1:#c8c83c;--c2:#e6e646">C++</div>
-            <div class="colortip" style="--c1:#e17d00;--c2:#ff9b00">Kernel</div>
-            <div class="colortip" style="--c1:#cce880;--c2:#e0fc94">C1-Compiled</div>
-        </div>
-        <div style="float:left; margin-left: 4px">
-            <div style="padding: 4px;">Special colors:</div>
-            <div class="colortip" style="--c1:#40b2ff;--c2:#40b2ff">Matches regexp</div>
-            <div class="colortip" style="--c1:#baa551;--c2:#baa551">New frames</div>
-            <div class="colortip" style="--c1:#f0f0c0;--c2:#f0f0c0">Same frames</div>
-            <div class="colortip" style="--c1:#99aaff;--c2:#99aaff">Less frames</div>
-            <div class="colortip" style="--c1:#ffaa99;--c2:#ffaa99">More frames</div>
-        </div>
-        <div style="float:left; margin-top: 4px; width: 100%; border: 1px solid #666666; border-radius: 2px; padding: 2px; box-sizing: border-box;">
-            Shift + Click - Select range<br>
-            Ctrl + Click - Compare<br>
-            Ctrl + F - Search<br>
+    <div class='bordered' style="user-select: none; background-color: #efefef; padding: 2px; margin-left: 1px">
+        <div id="heatmap-info" class="toolbarIcon">&#128712;</div>
+        <div class="toolbarIcon" title="Search by Regex">&#128269;</div>
+
+        <div id="flame-mode-flame" class="toolbarIcon toolbarSelected" style="margin-top: 16px" title="Mode (FlameGraph)">&#128293;</div>
+        <div id="flame-mode-reversed" class="toolbarIcon" title="Mode (Reversed FlameGraph)">&#10052;</div>
+        <div id="flame-mode-methods" class="toolbarIcon" title="Mode (Methods List)">&#128202;</div>
+
+        <div id="info-tooltip">
+            <div style="float:left">
+                <div style="padding: 4px;">Frame types:</div>
+                <div class="colortip" style="--c1:#b2e1b2;--c2:#c6f5c6">Interpreted</div>
+                <div class="colortip" style="--c1:#50e150;--c2:#6eff6e">JIT-Compiled</div>
+                <div class="colortip" style="--c1:#50cccc;--c2:#6eeaea">Inlined</div>
+                <div class="colortip" style="--c1:#e15a5a;--c2:#ff8282">Native</div>
+                <div class="colortip" style="--c1:#c8c83c;--c2:#e6e646">C++</div>
+                <div class="colortip" style="--c1:#e17d00;--c2:#ff9b00">Kernel</div>
+                <div class="colortip" style="--c1:#cce880;--c2:#e0fc94">C1-Compiled</div>
+            </div>
+            <div style="float:left; margin-left: 4px">
+                <div style="padding: 4px;">Special colors:</div>
+                <div class="colortip" style="--c1:#40b2ff;--c2:#40b2ff">Matches regexp</div>
+                <div class="colortip" style="--c1:#baa551;--c2:#baa551">New frames</div>
+                <div class="colortip" style="--c1:#f0f0c0;--c2:#f0f0c0">Same frames</div>
+                <div class="colortip" style="--c1:#99aaff;--c2:#99aaff">Less frames</div>
+                <div class="colortip" style="--c1:#ffaa99;--c2:#ffaa99">More frames</div>
+            </div>
+            <div style="float:left; margin-top: 4px; width: 100%; border: 1px solid #666666; border-radius: 2px; padding: 2px; box-sizing: border-box;">
+                Shift + Click - Select range<br>
+                Ctrl + Click - Compare<br>
+                Ctrl + F - Search<br>
+            </div>
         </div>
     </div>
 </div>
@@ -280,6 +308,31 @@
 
     const search = typeof searchIterative === 'function' ? searchIterative : searchSimple;
     const init = typeof renderHeatmap === 'function' ? renderHeatmap : render;
+
+    let lastRenderFrom = 0;
+    let lastRenderTo = 0;
+    let renderFunc = renderSelfDominators;
+
+    for (let mode of ['flame-mode-flame', 'flame-mode-reversed', 'flame-mode-methods']) {
+        document.getElementById(mode).onclick = () => {
+            switch (mode) {
+                case 'flame-mode-flame':
+                    renderFunc = renderTraces;
+                    break;
+                case 'flame-mode-reversed':
+                    renderFunc = renderTracesReversed;
+                    break;
+                case 'flame-mode-methods':
+                    renderFunc = renderSelfDominators;
+                    break;
+            }
+            for (let m of ['flame-mode-flame', 'flame-mode-reversed', 'flame-mode-methods']) {
+                document.getElementById(m).classList.remove('toolbarSelected');
+            }
+            document.getElementById(mode).classList.add('toolbarSelected');
+            renderFunc(lastRenderFrom, lastRenderTo);
+        };
+    }
 
     const palette = [
         [0xb2e1b2, 20, 20, 20],
@@ -1158,6 +1211,54 @@
         }
     }
 
+    function renderSelfDominators(from, to) {
+        addTask('flame', function () {
+            return false;
+        }, function () {});
+        addTask('flamePrepare', () => {
+            const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
+            const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
+            const storage = currentHeatmap.blocksData.storage;
+            const counts = currentHeatmap.blocksData.counts;
+
+            const countBeforeFirstBlock = getCount(counts, from - 1);
+            const countAtLastBlock = getCount(counts, to);
+
+            const methodsCount = new Uint32Array(methods.c.length);
+            const methodsBuffer = new Uint32Array(methods.c.length);
+            let methodsInBuffer = 0;
+            let maxCount = 0;
+
+            for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+                const chunkEndPos = sampleToChunkEnds[sampleIndex];
+                const storagePos = chunksToStorage[chunkEndPos - 1];
+                const method = storage[storagePos];
+                const oldCount = methodsCount[method]++;
+                if (oldCount === 0) {
+                    methodsBuffer[methodsInBuffer++] = method;
+                }
+                maxCount = Math.max(maxCount, oldCount);
+            }
+
+            sort(methodsBuffer, 0, methodsInBuffer, methodsCount, 1 << (31 - Math.clz32(maxCount + 1)));
+            levels.length = 0;
+            for (let i = 0; i < methodsInBuffer; i++) {
+                const method = methodsBuffer[i];
+                levels.push([{left: 0, width: methodsCount[method], color: methods.c[method], title: methods.n[method], method: method}]);
+            }
+            renderWithMatch(levels.length * 16, levels[0][0], 0);
+            return false;
+        }, function () {
+        });
+
+    }
+
+    function renderWrapper(from, to) {
+        lastRenderFrom = from;
+        lastRenderTo = to;
+        renderFunc(from, to);
+    }
+
     function renderTraces(from, to) {
         addTask('flame', function () {
             return false;
@@ -1200,6 +1301,73 @@
             addTask('flame', () => {
                     ctx.level = levels.length;
                     const roots = nextFrames(ctx);
+                    if (roots.length === 0) {
+                        if (levels.length === 0) {
+                            levels.push([{left: 0, width: 0, color: methods.c[0], title: methods.n[0], method: 0}]);
+                        }
+                        renderWithMatch(levels.length * 16, levels[0][0], 0);
+                        return false;
+                    }
+
+                    const tmp = ctx.nextFrames;
+                    ctx.nextFrames = ctx.frames;
+                    ctx.frames = tmp;
+
+                    levels.push(roots);
+
+                    return true;
+                },
+                () => {
+                    renderWithMatch(4096, levels[0][0], 0, levelToRedraw);
+                    levelToRedraw = levels.length;
+                });
+            return false;
+        }, function () {
+
+        });
+
+    }
+
+    function renderTracesReversed(from, to) {
+        addTask('flame', function () {
+            return false;
+        }, function () {});
+        addTask('flamePrepare', () => {
+            let [framesBuffer, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer] = prepareFramesReversed(from, to);
+            let nextFramesBuffer = new Uint32Array(100050000);    // FIXME
+
+            levels.length = 0;
+
+            let levelToRedraw = 0;
+
+            const ctx = {
+                frames: framesBuffer,
+                nextFrames: nextFramesBuffer,
+                sampleToChunkPos: sampleToChunkPos,
+                sampleToStorageDelta: sampleToStorageDelta,
+                longSamplesBuffer: longSamplesBuffer,
+                level: 0,
+                chunksToStorage: currentHeatmap.blocksData.chunksToStorage,
+                storage: currentHeatmap.blocksData.storage,
+                sampleToChunkEnds: currentHeatmap.blocksData.sampleToChunkEnds,
+                storageSizes: currentHeatmap.blocksData.storageSizes,
+                methodsBuffer: new Uint32Array(methods.c.length + 1),
+                methodsBufferTheOnlyChunks: new Uint32Array(methods.c.length + 1),
+                methodsBufferDirectSamples: new Uint32Array(methods.c.length + 1),
+
+                startX: 0,
+                theOnlyChunksCount: 0,
+                directSamplesCount: 0,
+
+                framesPointer: 0,
+                nextFramesPointer: 0,
+                nextFramesCount: 0,
+                methodsMapFirstPos: 0,
+            };
+
+            addTask('flame', () => {
+                    ctx.level = levels.length;
+                    const roots = nextFramesReversed(ctx);
                     if (roots.length === 0) {
                         if (levels.length === 0) {
                             levels.push([{left: 0, width: 0, color: methods.c[0], title: methods.n[0], method: 0}]);
@@ -1535,6 +1703,44 @@
         return children;
     }
 
+    function prepareTheOnlyChunksReversed(ctx) {
+        const frames = ctx.frames;
+        const nextFrames = ctx.nextFrames;
+        const level = ctx.level;
+        const storage = ctx.storage;
+        const storageSizes = ctx.storageSizes;
+        const methodsBuffer = ctx.methodsBuffer;
+        const methodsBufferTheOnlyChunks = ctx.methodsBufferTheOnlyChunks;
+
+        const theOnlyChunksCount = ctx.theOnlyChunksCount;
+
+        let fp = ctx.framesPointer;
+        let methodsMapFirstPos = ctx.methodsMapFirstPos;
+
+        let children = 0;
+        for (let child = 0; child < theOnlyChunksCount; child++) {
+            const storagePos = frames[fp++];
+            const count = frames[fp++];
+            const size = storageSizes[storagePos];
+            if (size === level) {
+                continue;
+            }
+            const methodId = storage[storagePos + level];
+
+            if ((methodsBuffer[methodId] += count) === count) {
+                nextFrames[--methodsMapFirstPos] = methodId;
+            }
+            methodsBufferTheOnlyChunks[methodId]++;
+
+            children++;
+        }
+
+        ctx.framesPointer = fp;
+        ctx.methodsMapFirstPos = methodsMapFirstPos;
+
+        return children;
+    }
+
     function prepareBaseTheOnlyChunks(ctx) {
         const frames = ctx.frames;
         const level = ctx.level;
@@ -1659,6 +1865,51 @@
             const storagePos = storageStartPos + storageDelta - 1;
 
             const methodId = storage[storagePos];
+
+            if (methodsBuffer[methodId]++ === 0) {
+                nextFrames[--methodsMapFirstPos] = methodId;
+            }
+            methodsBufferDirectSamples[methodId]++;
+
+            children++;
+        }
+
+        ctx.framesPointer = fp;
+        ctx.methodsMapFirstPos = methodsMapFirstPos;
+
+        return children;
+    }
+
+    function prepareDirectSamplesReversed(ctx) {
+        const frames = ctx.frames;
+        const nextFrames = ctx.nextFrames;
+        const sampleToChunkPos = ctx.sampleToChunkPos;
+        const sampleToStorageDelta = ctx.sampleToStorageDelta;
+        const level = ctx.level;
+        const chunksToStorage = ctx.chunksToStorage;
+        const storageSizes = ctx.storageSizes;
+        const storage = ctx.storage;
+        const methodsBuffer = ctx.methodsBuffer;
+        const methodsBufferDirectSamples = ctx.methodsBufferDirectSamples;
+
+        const directSamplesCount = ctx.directSamplesCount;
+
+        let children = 0;
+
+        let fp = ctx.framesPointer;
+        let methodsMapFirstPos = ctx.methodsMapFirstPos;
+
+        for (let child = 0; child < directSamplesCount; child++) {
+            const sampleIndex = frames[fp++];
+            const storageDelta = level - sampleToStorageDelta[sampleIndex];
+
+            const chunkPos = sampleToChunkPos[sampleIndex];
+            const storageStartPos = chunksToStorage[chunkPos];
+            if (storageSizes[storageStartPos] <= storageDelta) {
+                continue;
+            }
+
+            const methodId = storage[storageStartPos + storageDelta];
 
             if (methodsBuffer[methodId]++ === 0) {
                 nextFrames[--methodsMapFirstPos] = methodId;
@@ -1807,6 +2058,37 @@
         }
     }
 
+    function writeNextFramesReversed(ctx) {
+        const nextFrames = ctx.nextFrames;
+        const methodsBuffer = ctx.methodsBuffer;
+        const methodsBufferTheOnlyChunks = ctx.methodsBufferTheOnlyChunks;
+        const methodsBufferDirectSamples = ctx.methodsBufferDirectSamples;
+
+        const methodsMapFirstPos = ctx.methodsMapFirstPos;
+
+        let np = ctx.nextFramesPointer;
+        let x = ctx.startX;
+
+        for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
+            const methodId = nextFrames[i];
+            const count = methodsBuffer[methodId];
+            const theOnlyChunksCountForMethod = methodsBufferTheOnlyChunks[methodId];
+            const directSamplesCount = methodsBufferDirectSamples[methodId];
+
+            nextFrames[np++] = methodId;
+            nextFrames[np++] = x;
+            nextFrames[np++] = count;
+            nextFrames[np++] = theOnlyChunksCountForMethod;
+            nextFrames[np++] = directSamplesCount;
+
+            x += count;
+            methodsBufferTheOnlyChunks[methodId] = np;
+            np += theOnlyChunksCountForMethod * 2;
+            methodsBufferDirectSamples[methodId] = np;
+            np += directSamplesCount;
+        }
+    }
+
     function writeNextFramesDiff(ctx) {
         const nextFrames = ctx.nextFrames;
         const methodsBuffer = ctx.methodsBuffer;
@@ -1879,6 +2161,33 @@
             }
 
             const methodId = storage[storagePos + size - levelPlusOne];
+
+            nextFrames[methodsBufferTheOnlyChunks[methodId]++] = storagePos;
+            nextFrames[methodsBufferTheOnlyChunks[methodId]++] = count;
+        }
+        ctx.framesPointer = fp;
+    }
+
+    function splitTheOnlyChunksReversed(ctx) {
+        const frames = ctx.frames;
+        const nextFrames = ctx.nextFrames;
+        const level = ctx.level;
+        const storage = ctx.storage;
+        const storageSizes = ctx.storageSizes;
+        const methodsBufferTheOnlyChunks = ctx.methodsBufferTheOnlyChunks;
+
+        const theOnlyChunksCount = ctx.theOnlyChunksCount;
+
+        let fp = ctx.framesPointer;
+        for (let child = 0; child < theOnlyChunksCount; child++) {
+            const storagePos = frames[fp++];
+            const count = frames[fp++];
+            const size = storageSizes[storagePos];
+            if (size === level) {
+                continue;
+            }
+
+            const methodId = storage[storagePos + level];
 
             nextFrames[methodsBufferTheOnlyChunks[methodId]++] = storagePos;
             nextFrames[methodsBufferTheOnlyChunks[methodId]++] = count;
@@ -2012,6 +2321,51 @@
         ctx.framesPointer = fp;
     }
 
+    function splitDirectSamplesReversed(ctx) {
+        const frames = ctx.frames;
+        const nextFrames = ctx.nextFrames;
+        const sampleToChunkPos = ctx.sampleToChunkPos;
+        const sampleToStorageDelta = ctx.sampleToStorageDelta;
+        const level = ctx.level;
+        const chunksToStorage = ctx.chunksToStorage;
+        const storage = ctx.storage;
+        const sampleToChunkEnds = ctx.sampleToChunkEnds;
+        const storageSizes = ctx.storageSizes;
+        const methodsBufferDirectSamples = ctx.methodsBufferDirectSamples;
+
+        const directSamplesCount = ctx.directSamplesCount;
+
+        const levelPlusOne = level + 1;
+
+        let fp = ctx.framesPointer;
+        for (let child = 0; child < directSamplesCount; child++) {
+            const sampleIndex = frames[fp++];
+            const storageDelta = level - sampleToStorageDelta[sampleIndex];
+
+            let chunkPos = sampleToChunkPos[sampleIndex];
+            const storageStartPos = chunksToStorage[chunkPos];
+            const storageSize = storageSizes[storageStartPos];
+            if (storageSize <= storageDelta) {
+                continue;
+            }
+
+            const storagePos = storageStartPos + storageDelta;
+
+            if (storageDelta + 1 === storageSize) {
+                const chunkStart = sampleToChunkEnds[sampleIndex - 1] || 0;
+                if (--chunkPos !== chunkStart) {
+                    sampleToChunkPos[sampleIndex] = chunkPos;
+                    sampleToStorageDelta[sampleIndex] = levelPlusOne;
+                }
+            }
+
+            const methodId = storage[storagePos];
+
+            nextFrames[methodsBufferDirectSamples[methodId]++] = sampleIndex;
+        }
+        ctx.framesPointer = fp;
+    }
+
     function splitDirectSamplesDiff(ctx) {
         const frames = ctx.frames;
         const nextFrames = ctx.nextFrames;
@@ -2129,6 +2483,26 @@
             methodsBufferDirectSamples[methodId] = 0;
 
             np += nextFrames[np + 3] * 2 + nextFrames[np + 4] * 3 + nextFrames[np + 5] + 6;
+        }
+        ctx.nextFramesPointer = np;
+    }
+
+    function cleanupMethodBuffersReversed(ctx) {
+        const nextFrames = ctx.nextFrames;
+        const methodsBuffer = ctx.methodsBuffer;
+        const methodsBufferTheOnlyChunks = ctx.methodsBufferTheOnlyChunks;
+        const methodsBufferDirectSamples = ctx.methodsBufferDirectSamples;
+
+        let np = ctx.nextFramesPointer;
+        let methodsMapFirstPos = ctx.methodsMapFirstPos;
+        for (let i = methodsMapFirstPos; i < nextFrames.length; i++) {
+            const methodId = nextFrames[np];
+
+            methodsBuffer[methodId] = 0;
+            methodsBufferTheOnlyChunks[methodId] = 0;
+            methodsBufferDirectSamples[methodId] = 0;
+
+            np += nextFrames[np + 3] * 2 + nextFrames[np + 4] + 5;
         }
         ctx.nextFramesPointer = np;
     }
@@ -2373,6 +2747,145 @@
         const methodCount = ctx.nextFrames.length - ctx.methodsMapFirstPos;
         ctx.nextFramesCount += methodCount;
         ctx.framesPointer = endFramesPointer;
+    }
+
+    function prepareFramesReversed(from, to) {
+        const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
+        const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
+        const storageSizes = currentHeatmap.blocksData.storageSizes;
+        const counts = currentHeatmap.blocksData.counts;
+
+        const countBeforeFirstBlock = getCount(counts, from - 1);
+        const countAtLastBlock = getCount(counts, to);
+        const count = countAtLastBlock - countBeforeFirstBlock;
+
+        const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
+        const sampleToChunkPos = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
+        const sampleToStorageDelta = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
+        const theOnlyChunks = new Uint32Array(storageSizes.length);   // fixme prealloc it!
+
+        let theOnlyChunksBufferPos = 0;
+        let singleSamplesCount = 0;
+        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos === chunkEndPos - 1) {
+                const storagePos = chunksToStorage[chunkPos];
+                if (theOnlyChunks[storagePos]++ === 0) {
+                    theOnlyChunksBuffer[theOnlyChunksBufferPos++] = storagePos;
+                }
+            } else {
+                singleSamplesCount++;
+            }
+        }
+
+        // fixme prealloc it with max possible size!
+        const framesBuffer = new Uint32Array(10005000);
+        framesBuffer[0] = count === 0 ? 0 : 1;    // frames count on this level
+
+        framesBuffer[1] = 0;    // methodId
+        framesBuffer[2] = 0;    // x
+        framesBuffer[3] = count;
+        framesBuffer[4] = theOnlyChunksBufferPos;
+        framesBuffer[5] = singleSamplesCount;    // direct samples count
+
+        let framesBufferPos = 6;
+
+        for (let storagePosIndex = 0; storagePosIndex < theOnlyChunksBufferPos; storagePosIndex++) {
+            const storagePos = theOnlyChunksBuffer[storagePosIndex];
+            framesBuffer[framesBufferPos++] = storagePos;
+            framesBuffer[framesBufferPos++] = theOnlyChunks[storagePos];
+        }
+
+        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos !== chunkEndPos - 1) {
+                sampleToChunkPos[sampleIndex] = chunkEndPos - 1;
+                sampleToStorageDelta[sampleIndex] = 0;
+
+                framesBuffer[framesBufferPos++] = sampleIndex;
+            }
+        }
+
+        return [framesBuffer, sampleToChunkPos, sampleToStorageDelta];
+    }
+
+    function nextFramesReversed(ctx) {
+        const frames = ctx.frames;
+        const nextFrames = ctx.nextFrames;
+
+        ctx.startX = 0;
+        ctx.theOnlyChunksCount = 0;
+        ctx.directSamplesCount = 0;
+
+        ctx.nextFramesPointer = 1; // one reserved to place nextFramesCount
+        ctx.nextFramesCount = 0;
+
+        let fp = 0;
+        const framesCount = frames[fp++];
+
+        const roots = new Array(framesCount);
+        for (let frame = 0; frame < framesCount; frame++) {
+            const methodId = frames[fp++];
+            const x = frames[fp++];
+            const childrenCount = frames[fp++];
+
+            ctx.startX = x;
+            ctx.theOnlyChunksCount = frames[fp++];
+            ctx.directSamplesCount = frames[fp++];
+
+            roots[frame] = {
+                left: x,
+                width: childrenCount,
+                color: methods.c[methodId],
+                title: methods.n[methodId],
+                details: methods.b[methodId],
+                method: methodId
+            };
+
+            ctx.framesPointer = fp;
+            ctx.methodsMapFirstPos = ctx.nextFrames.length;
+            processFrameReversed(ctx)
+            fp = ctx.framesPointer;
+        }
+
+        nextFrames[0] = ctx.nextFramesCount;
+
+        return roots;
+    }
+
+    function processFrameReversed(ctx) {
+        const startFramesPointer = ctx.framesPointer;
+
+        // the main idea is to go through the samples and calculate total amount of samples for every method, using method buffers
+        let totalChildren = 0;
+        // calculates count of each method in methodsBufferTheOnlyChunks (for the-only-one-chunk samples)
+        totalChildren += prepareTheOnlyChunksReversed(ctx);
+        // calculates count of each method in methodsBufferDirectSamples (for direct samples, expanded to list of methods)
+        totalChildren += prepareDirectSamplesReversed(ctx);
+
+        if (totalChildren === 0) {
+            return;
+        }
+
+        // frames are sorted from more frequent to less frequent
+        sortFramesForWrite(ctx);
+        // writes frames data and reserves place for splitting samples between methods
+        writeNextFramesReversed(ctx);
+
+        // the main idea is to go through the samples again and split them by methods into prepared buffer
+        ctx.framesPointer = startFramesPointer;
+        // splits the-only-one-chunk samples, skips finished samples
+        splitTheOnlyChunksReversed(ctx);
+        // splits direct samples, skips finished samples
+        splitDirectSamplesReversed(ctx);
+
+        // cleans buffers and moves nextFramesPointer
+        cleanupMethodBuffersReversed(ctx);
+
+        const methodCount = ctx.nextFrames.length - ctx.methodsMapFirstPos;
+        ctx.nextFramesCount += methodCount;
     }
 
     function renderWithMatch(newCanvasHeight, root, level, minLevel) {
@@ -2691,7 +3204,7 @@
 
         fillCanvasWithEvents(calculateInitialZoom());
 
-        renderTraces(0, currentHeatmap.blocksData.counts.length - 1);
+        renderWrapper(0, currentHeatmap.blocksData.counts.length - 1);
     }
 
     heatCanvasContainer.addEventListener('scroll', function () {
@@ -2862,7 +3375,7 @@
 
             callHighlightRedraw(highlightStart, highlightEnd, 'Diff');
             callHighlightRedraw(minSelected, maxSelected, 'Active');
-            renderTraces(
+            renderWrapper(
                 (minSelected - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
                 (maxSelected - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1
             );
@@ -2925,6 +3438,8 @@
     };
 
     init();
+    // first render of dominators
+    renderFunc = renderTraces;
     // FIXME search(/*highlight:*/);
 </script>
 </body>
