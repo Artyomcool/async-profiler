@@ -65,7 +65,15 @@ public class SampleList {
             stackIds[stackIdsPos++] = (int) (currentData & 0xFFFFFFFFL) - 1;
         }
 
+        if (currentBlockId <= lastBlockId) {
+            blockSizes[currentBlockIndex] = currentBlockSize;
+        }
+
         return new Result(blockSizes, stackIds);
+    }
+
+    public int getRecordsCount() {
+        return recordsCount;
     }
 
     public static class Result {

@@ -187,7 +187,9 @@
 
     <div class='bordered' style="user-select: none; background-color: #efefef; padding: 2px; margin-left: 1px">
         <div id="heatmap-info" class="toolbarIcon">&#128712;</div>
-        <div class="toolbarIcon" title="Search by Regex">&#128269;</div>
+        <div id="search" class="toolbarIcon" title="Search by Regex">&#128269;</div>
+        <div id="filter" class="toolbarIcon" title="Filter by Regex">&#128584;</div>
+        <div id="flame-diff-reverse" class="toolbarIcon" title="Reverse Diff">&#8644;</div>
 
         <div id="flame-mode-flame" class="toolbarIcon toolbarSelected" style="margin-top: 16px" title="Mode (FlameGraph)">&#128293;</div>
         <div id="flame-mode-reversed" class="toolbarIcon" title="Mode (Reversed FlameGraph)">&#10052;</div>
@@ -290,6 +292,7 @@
 
     let root, rootLevel, px, pattern;
     let showFound = false;
+    let filterFrames = false;
     const levels = [];
 
     const canvas = document.getElementById('canvas');
@@ -306,33 +309,51 @@
     if (devicePixelRatio) c.scale(devicePixelRatio, devicePixelRatio);
     c.font = document.body.style.font;
 
-    const search = typeof searchIterative === 'function' ? searchIterative : searchSimple;
     const init = typeof renderHeatmap === 'function' ? renderHeatmap : render;
 
     let lastRenderFrom = 0;
     let lastRenderTo = 0;
+    let lastBaseRenderFrom = 0;
+    let lastBaseRenderTo = 0;
     let renderFunc = renderSelfDominators;
+    let renderFuncDiff = renderDiff;
 
     for (let mode of ['flame-mode-flame', 'flame-mode-reversed', 'flame-mode-methods']) {
         document.getElementById(mode).onclick = () => {
             switch (mode) {
                 case 'flame-mode-flame':
                     renderFunc = renderTraces;
+                    renderFuncDiff = renderDiff;
                     break;
                 case 'flame-mode-reversed':
                     renderFunc = renderTracesReversed;
                     break;
                 case 'flame-mode-methods':
                     renderFunc = renderSelfDominators;
+                    renderFuncDiff = renderSelfDominatorsDiff;
                     break;
             }
             for (let m of ['flame-mode-flame', 'flame-mode-reversed', 'flame-mode-methods']) {
                 document.getElementById(m).classList.remove('toolbarSelected');
             }
             document.getElementById(mode).classList.add('toolbarSelected');
-            renderFunc(lastRenderFrom, lastRenderTo);
+            reselect();
         };
     }
+
+    document.getElementById('flame-diff-reverse').onclick = () => {
+        if (heatDiffStart !== -1) {
+            renderWrapperDiff(lastBaseRenderFrom, lastBaseRenderTo, lastRenderFrom, lastRenderTo);
+        }
+    };
+
+    document.getElementById('search').onclick = () => {
+        search(true);
+    };
+
+    document.getElementById('filter').onclick = () => {
+        search(true, true);
+    };
 
     const palette = [
         [0xb2e1b2, 20, 20, 20],
@@ -498,7 +519,7 @@
                 }
 
                 if (alpha) {
-                    c.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                    c.fillStyle = 'rgba(255, 255, 255, 0.25)';
                     c.fillRect((f.left - x0) * px, y, fw, 15);
                 }
             }
@@ -589,7 +610,7 @@
                 canvas.title = f.title + '\n(' + samples(f.width) + details + ', ' + pct(f.width, levels[0][0].width) + '%)';
                 canvas.style.cursor = 'pointer';
                 canvas.onclick = function (e) {
-                    if (e.altKey) {
+                    if (e.shiftKey) {
                         e.preventDefault();
                         searchForMethod(f.method);
                         canvas.onmousemove(e);
@@ -634,7 +655,7 @@
     window.onkeydown = function (e) {
         if (e.ctrlKey && e.keyCode === 70) {
             e.preventDefault();
-            search(true);
+            search(true, e.shiftKey);
         } else if (e.keyCode === 27) {
             search(false);
         } else if (e.keyCode === 16) {
@@ -746,7 +767,9 @@
         const lz78Sizes = new Uint32Array(buffer, lz78RecordsCount * 12, lz78RecordsCount);
         const lz78Refs = new Uint32Array(buffer, lz78RecordsCount * 16, lz78RecordsCount);
 
-        const returnBuffer = new ArrayBuffer(4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 16 * zoomToGroupSize.length + storageSize);
+        const storageMarksIntsCount = (storageSize >> 5) + 1;
+        const sampleMarksIntsCount = (samplesCount >> 5) + 1;
+        const returnBuffer = new ArrayBuffer(4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 16 * zoomToGroupSize.length + 4 * storageMarksIntsCount + 4 * sampleMarksIntsCount);
         const sampleToChunkEnds = new Uint32Array(returnBuffer, 0, samplesCount);  // FIXME NOTE!!! parents in most cases takes only 3 bytes!
         const chunksToStorage = new Uint32Array(returnBuffer, 4 * samplesCount, chunksCount);  // FIXME NOTE!!! parents in most cases takes only 3 bytes!
         const storage = new Uint32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount, storageSize);   // FIXME NOTE!!! methods in most cases takes only 2 bytes!
@@ -757,7 +780,8 @@
         const searchMaxCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 4 * zoomToGroupSize.length, zoomToGroupSize.length);
         const minCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 8 * zoomToGroupSize.length, zoomToGroupSize.length);
         const searchMinCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 12 * zoomToGroupSize.length, zoomToGroupSize.length);
-        const marks = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 16 * zoomToGroupSize.length, (storageSize >> 5) + 1);
+        const marks = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 16 * zoomToGroupSize.length, storageMarksIntsCount);
+        const sampleMarks = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 16 * zoomToGroupSize.length + 4 * storageMarksIntsCount, sampleMarksIntsCount);
 
         const huffmanTableSize = data.nextVarInt();
         const huffmanMaxBits = data.nextVarInt();
@@ -769,49 +793,52 @@
             huffmanCounts[data.nextVarInt()]++;
         }
 
-        let firstHuffmanCodeForCount = 0;
-        let currentHuffmanCode = 0;
-        let currentCountPos = 1;
-        let valuesPos = 0;
+        if (huffmanMaxBits === 0) {
+            counts.fill(huffmanValues[0]);
+        } else {
+            let firstHuffmanCodeForCount = 0;
+            let currentHuffmanCode = 0;
+            let currentCountPos = 1;
+            let valuesPos = 0;
 
-        let block = 0;
-        a:while (true) {
-            let bits = (Math.imul(data.nextSymbol(), 1860867)   // 123^3
-                + Math.imul(data.nextSymbol(), 15129)           // 123^2
-                + Math.imul(data.nextSymbol(), 123)             // 123^1
-                + data.nextSymbol()) | 0;                       // 123^0
+            let block = 0;
+            a:while (true) {
+                let bits = (Math.imul(data.nextSymbol(), 1860867)   // 123^3
+                    + Math.imul(data.nextSymbol(), 15129)           // 123^2
+                    + Math.imul(data.nextSymbol(), 123)             // 123^1
+                    + data.nextSymbol()) | 0;                       // 123^0
 
-            for (let i = 0; i < 27; i++) {      // 27 bits per symbol
-                currentHuffmanCode |= bits & 1;
-                bits >>>= 1;
-                let count = huffmanCounts[currentCountPos];
+                for (let i = 0; i < 27; i++) {      // 27 bits per symbol
+                    currentHuffmanCode |= bits & 1;
+                    bits >>>= 1;
+                    let count = huffmanCounts[currentCountPos];
 
-                let nextHuffmanCodeForCount = firstHuffmanCodeForCount + count;
-                if (nextHuffmanCodeForCount > currentHuffmanCode) {
-                    counts[block] = huffmanValues[valuesPos + currentHuffmanCode - firstHuffmanCodeForCount];
-                    if (++block >= blocksCount) {
-                        break a;
+                    let nextHuffmanCodeForCount = firstHuffmanCodeForCount + count;
+                    if (nextHuffmanCodeForCount > currentHuffmanCode) {
+                        counts[block] = huffmanValues[valuesPos + currentHuffmanCode - firstHuffmanCodeForCount];
+                        if (++block >= blocksCount) {
+                            break a;
+                        }
+                        firstHuffmanCodeForCount = 0;
+                        currentHuffmanCode = 0;
+                        currentCountPos = 1;
+                        valuesPos = 0;
+                    } else {
+                        firstHuffmanCodeForCount = nextHuffmanCodeForCount << 1;
+                        currentHuffmanCode <<= 1;
+                        currentCountPos++;
+                        valuesPos += count;
                     }
-                    firstHuffmanCodeForCount = 0;
-                    currentHuffmanCode = 0;
-                    currentCountPos = 1;
-                    valuesPos = 0;
-                } else {
-                    firstHuffmanCodeForCount = nextHuffmanCodeForCount << 1;
-                    currentHuffmanCode <<= 1;
-                    currentCountPos++;
-                    valuesPos += count;
                 }
             }
         }
+
 
         let synonymsCount = data.nextVarInt();
         const synonyms = new Uint32Array(synonymsCount);
         for (let i = 0; i < synonymsCount; i++) {
             synonyms[i] = data.nextVarInt();
         }
-
-        let lz78LastRecordIndex = 0;
 
         let totalCount = 0;
         for (let c = 0; c < counts.length; c++) {
@@ -821,40 +848,31 @@
 
         calculateMinMax(counts, minCounts, maxCounts);
 
-        for (let i = 0; i < lz78RecordsCount - 1; i++) {
+        for (let recordId = 1; recordId < lz78RecordsCount; recordId++) {
             const prevChunkId = data.nextVarInt();
             const addMethodId = data.nextVarInt();
 
             const lzPrevRecordId = (prevChunkId < synonymsCount ? synonyms[prevChunkId] : prevChunkId) - synonymsCount;
 
-            lz78LastRecordIndex++
             // 0 bit for starts, 1 bit for leafs
             const prevFlags = lz78RootMethods[lzPrevRecordId];
             lz78RootMethods[lzPrevRecordId] = prevFlags & 1;   // not a leaf anymore
-            lz78RootMethods[lz78LastRecordIndex] = lzPrevRecordId === 0
+            lz78RootMethods[recordId] = lzPrevRecordId === 0
                 ? (starts.has(addMethodId) ? 3 : 2)
                 : (prevFlags | 2);  // leaf for now
 
-            lz78CurrentMethods[lz78LastRecordIndex] = addMethodId;
-            lz78Parents[lz78LastRecordIndex] = lzPrevRecordId;
-            lz78Sizes[lz78LastRecordIndex] = lz78Sizes[lzPrevRecordId] + 1;
+            lz78CurrentMethods[recordId] = addMethodId;
+            lz78Parents[recordId] = lzPrevRecordId;
+            lz78Sizes[recordId] = lz78Sizes[lzPrevRecordId] + 1;
         }
 
-        synonymsCount = data.nextVarInt();
-        for (let i = 0; i < synonymsCount; i++) {
-            synonyms[i] = data.nextVarInt();
-        }
-
-        let sample = 0;
         let pos = 0;
-        for (let chunk = 0; chunk < chunksCount; chunk++) {
-            const chunkId = data.nextVarInt();
-            let recordId = (chunkId < synonymsCount ? synonyms[chunkId] : chunkId) - synonymsCount;
-            const flags = lz78RootMethods[recordId];
-            chunksToStorage[chunk] = recordId;
+        for (let rid = 1; rid < lz78RecordsCount; rid++) {
+            const flags = lz78RootMethods[rid];
             if (flags & 2) {    // leaf
-                const storagePos = lz78Refs[recordId];
+                const storagePos = lz78Refs[rid];
                 if (storagePos === 0) {
+                    let recordId  = rid;
                     let size = lz78Sizes[recordId];
                     do {
                         storageSizes[pos] = size--;
@@ -872,6 +890,19 @@
                     }
                 }
             }
+        }
+
+        synonymsCount = data.nextVarInt();
+        for (let i = 0; i < synonymsCount; i++) {
+            synonyms[i] = data.nextVarInt();
+        }
+
+        let sample = 0;
+        for (let chunk = 0; chunk < chunksCount; chunk++) {
+            const chunkId = data.nextVarInt();
+            let recordId = (chunkId < synonymsCount ? synonyms[chunkId] : chunkId) - synonymsCount;
+            const flags = lz78RootMethods[recordId];
+            chunksToStorage[chunk] = recordId;
             if (flags & 1) {    // start of the next sample
                 if (sample !== 0) {
                     sampleToChunkEnds[sample - 1] = chunk;
@@ -879,13 +910,18 @@
                 sample++;
             }
         }
+        if (pos > storage.length) {
+            throw "storage is too low";
+        }
         sampleToChunkEnds[sample - 1] = chunksCount;
 
         for (let chunk = 0; chunk < chunksCount; chunk++) {
             const recordId = chunksToStorage[chunk];
-            chunksToStorage[chunk] = lz78Refs[recordId];
+            if (lz78Refs[recordId] === 0) {
+                throw recordId + " has no storagePos";
+            }
+            chunksToStorage[chunk] = lz78Refs[recordId] - 1;
         }
-
 
         return {
             sampleToChunkEnds: sampleToChunkEnds,
@@ -899,6 +935,7 @@
             minCounts: minCounts,
             searchMinCounts: searchMinCounts,
             marks: marks,
+            sampleMarks: sampleMarks,
         };
     }
 
@@ -994,7 +1031,7 @@
 
             names.push(methodName(cpool[className - 1], cpool[name - 1], bci, line, type));
             colors.push(getColorStable(palette[type], i + 1));
-            bcis[i + 1] = ", bci: " + bci;  // fixme it is too ugly
+            bcis[i + 1] = ", bci: " + bci + ", m: " + (i + 1);  // fixme it is too ugly
         }
 
         return {n: names, c: colors, b: bcis};
@@ -1234,6 +1271,9 @@
                 const storagePos = chunksToStorage[chunkEndPos - 1];
                 const method = storage[storagePos];
                 const oldCount = methodsCount[method]++;
+                if (isNaN(oldCount)) {
+                    throw "old count is nan";
+                }
                 if (oldCount === 0) {
                     methodsBuffer[methodsInBuffer++] = method;
                 }
@@ -1253,10 +1293,101 @@
 
     }
 
+    function renderSelfDominatorsDiff(from, to, baseFrom, baseTo) {
+        addTask('flame', function () {
+            return false;
+        }, function () {});
+        addTask('flamePrepare', () => {
+            const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
+            const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
+            const storage = currentHeatmap.blocksData.storage;
+            const counts = currentHeatmap.blocksData.counts;
+
+            const countBeforeFirstBlock = getCount(counts, from - 1);
+            const countAtLastBlock = getCount(counts, to);
+
+            const baseCountBeforeFirstBlock = getCount(counts, baseFrom - 1);
+            const baseCountAtLastBlock = getCount(counts, baseTo);
+
+            const methodsCount = new Uint32Array(methods.c.length);
+            const baseMethodsCount = new Uint32Array(methods.c.length);
+            const methodsBuffer = new Uint32Array(methods.c.length);
+            let methodsInBuffer = 0;
+            let maxCount = 1;
+            let minDiff = 1;
+            let maxDiff = 1;
+
+            for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+                const chunkEndPos = sampleToChunkEnds[sampleIndex];
+                const storagePos = chunksToStorage[chunkEndPos - 1];
+                const method = storage[storagePos];
+                const oldCount = methodsCount[method]++;
+                if (oldCount === 0) {
+                    methodsBuffer[methodsInBuffer++] = method;
+                }
+                maxCount = Math.max(maxCount, oldCount);
+            }
+
+            for (let sampleIndex = baseCountBeforeFirstBlock; sampleIndex < baseCountAtLastBlock; sampleIndex++) {
+                const chunkEndPos = sampleToChunkEnds[sampleIndex];
+                const storagePos = chunksToStorage[chunkEndPos - 1];
+                const method = storage[storagePos];
+                const oldCount = baseMethodsCount[method]++;
+                if (oldCount === 0 && methodsCount[method] === 0) {
+                    methodsBuffer[methodsInBuffer++] = method;
+                }
+            }
+
+            for (let i = 0; i < methodsInBuffer; i++) {
+                const method = methodsBuffer[i];
+                const count = methodsCount[method];
+                const baseCount = baseMethodsCount[method];
+
+                if (baseCount > count) {
+                    minDiff = Math.max(minDiff, baseCount - count);
+                } else {
+                    maxDiff = Math.max(maxDiff, count - baseCount);
+                }
+            }
+
+            sort(methodsBuffer, 0, methodsInBuffer, methodsCount, 1 << (31 - Math.clz32(maxCount)));
+
+            levels.length = 0;
+            for (let i = 0; i < methodsInBuffer; i++) {
+                const method = methodsBuffer[i];
+                const count = methodsCount[method];
+                const baseCount = baseMethodsCount[method];
+                const title = methods.n[method]  + " (" + count + "/" + baseCount + ")"
+
+                let color = diffColor(count, baseCount, minDiff, maxDiff);
+                levels.push([{left: 0, width: count, color: color, title: title, method: method}]);
+            }
+            renderWithMatch(levels.length * 16, levels[0][0], 0);
+            return false;
+        }, function () {
+        });
+    }
+
     function renderWrapper(from, to) {
         lastRenderFrom = from;
         lastRenderTo = to;
         renderFunc(from, to);
+    }
+
+    function renderWrapperDiff(from, to, baseFrom, baseTo) {
+        lastRenderFrom = from;
+        lastRenderTo = to;
+        lastBaseRenderFrom = baseFrom;
+        lastBaseRenderTo = baseTo;
+        renderFuncDiff(from, to, baseFrom, baseTo);
+    }
+
+    function reselect() {
+        if (heatDiffStart === -1) {
+            renderFunc(lastRenderFrom, lastRenderTo);
+        } else {
+            renderFuncDiff(lastRenderFrom, lastRenderTo, lastBaseRenderFrom, lastBaseRenderTo);
+        }
     }
 
     function renderTraces(from, to) {
@@ -1395,6 +1526,30 @@
 
     }
 
+    function diffColor(count, baseCount, minDiff, maxDiff) {
+        if (baseCount === 0) {
+            return "#ffdd33";
+        }
+        if (baseCount === count) {
+            return '#66e0f0';
+        }
+        if (baseCount > count) {
+            const ratio = (baseCount - count) / minDiff;
+            const ratioM = (ratio * 96 + 16) | 0;
+            const C = 255 - Math.abs(255 - (ratioM << 1));
+            const m = (255 - ratioM) - (C >> 1);
+
+            return 'rgb(' + (((dRdl * C) >> 8) + m) + ',' + (((dGdl * C) >> 8) + m) + ',' + (((dBdl * C) >> 8) + m) + ')';
+        }
+
+        const ratio = (count - baseCount) / maxDiff;
+        const ratioM = (ratio * 96 + 16) | 0;
+        const C = 255 - Math.abs(255 - (ratioM << 1));
+        const m = (255 - ratioM) - (C >> 1);
+
+        return 'rgb(' + (((dRdg * C) >> 8) + m) + ',' + (((dGdg * C) >> 8) + m) + ',' + (((dBdg * C) >> 8) + m) + ')';
+    }
+
     function renderDiff(from, to, baseFrom, baseTo) {
         let [framesBuffer, sampleToChunkPos, sampleToStorageDelta] = prepareFramesDiff(from, to, baseFrom, baseTo);
         let nextFramesBuffer = new Uint32Array(100050000);    // FIXME
@@ -1425,10 +1580,8 @@
 
             startX: 0,
             theOnlyChunksCount: 0,
-            longSamplesChunksCount: 0,
             directSamplesCount: 0,
             baseTheOnlyChunksCount: 0,
-            baseLongSamplesChunksCount: 0,
             baseDirectSamplesCount: 0,
 
             framesPointer: 0,
@@ -1457,32 +1610,7 @@
                 }
 
                 for (let root of roots) {
-                    let color;
-                    if (root.baseWidth === 0) {
-                        color = "#ffdd33";
-                    } else if (root.baseWidth === root.width) {
-                        color = '#66e0f0';
-                    } else if (root.baseWidth > root.width) {
-                        const ratio = (root.baseWidth - root.width) / minDiff;
-
-                        const ratioM = (ratio * 96 + 16) | 0;
-
-                        const C = 255 - Math.abs(255 - (ratioM << 1));
-                        const m = (255 - ratioM) - (C >> 1);
-
-                        color = 'rgb(' + (((dRdl * C) >> 8) + m) + ',' + (((dGdl * C) >> 8) + m) + ',' + (((dBdl * C) >> 8) + m) + ')';
-                    } else {
-                        const ratio = (root.width - root.baseWidth) / maxDiff;
-
-                        const ratioM = (ratio * 96 + 16) | 0;
-
-                        const C = 255 - Math.abs(255 - (ratioM << 1));
-                        const m = (255 - ratioM) - (C >> 1);
-
-                        color = 'rgb(' + (((dRdg * C) >> 8) + m) + ',' + (((dGdg * C) >> 8) + m) + ',' + (((dBdg * C) >> 8) + m) + ')';
-                    }
-
-                    root.color = color;
+                    root.color = diffColor(root.width, root.baseWidth, minDiff, maxDiff);
                     root.title = root.title + " (" + root.width + "/" + root.baseWidth + ")";
                 }
 
@@ -1507,7 +1635,6 @@
 
         const countBeforeFirstBlock = getCount(counts, from - 1);
         const countAtLastBlock = getCount(counts, to);
-        const count = countAtLastBlock - countBeforeFirstBlock;
 
         const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
         const firstChunkPosOfLongSamplesBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
@@ -1520,7 +1647,12 @@
 
         let firstChunkPosOfLongSamplesPos = 0;
         let totalCountLongSamples = 0;
+        let count = 0;
         for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            if (filterOut(sampleIndex)) {
+                continue;
+            }
+            count++;
             const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
             const chunkEndPos = sampleToChunkEnds[sampleIndex];
             const storagePos = chunksToStorage[chunkPos];
@@ -1569,6 +1701,9 @@
         }
 
         for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            if (filterOut(sampleIndex)) {
+                continue;
+            }
             const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
             const chunkEndPos = sampleToChunkEnds[sampleIndex];
             const storagePos = chunksToStorage[chunkPos];
@@ -1578,6 +1713,204 @@
         }
 
         return [framesBuffer, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer];
+    }
+
+    function prepareFramesReversed(from, to) {
+        const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
+        const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
+        const storageSizes = currentHeatmap.blocksData.storageSizes;
+        const counts = currentHeatmap.blocksData.counts;
+
+        const countBeforeFirstBlock = getCount(counts, from - 1);
+        const countAtLastBlock = getCount(counts, to);
+
+        const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
+        const sampleToChunkPos = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
+        const sampleToStorageDelta = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
+        const theOnlyChunks = new Uint32Array(storageSizes.length);   // fixme prealloc it!
+
+        let theOnlyChunksBufferPos = 0;
+        let singleSamplesCount = 0;
+        let count = 0;
+        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            if (filterOut(sampleIndex)) {
+                continue;
+            }
+            count++;
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos === chunkEndPos - 1) {
+                const storagePos = chunksToStorage[chunkPos];
+                if (theOnlyChunks[storagePos]++ === 0) {
+                    theOnlyChunksBuffer[theOnlyChunksBufferPos++] = storagePos;
+                }
+            } else {
+                singleSamplesCount++;
+            }
+        }
+
+        // fixme prealloc it with max possible size!
+        const framesBuffer = new Uint32Array(10005000);
+        framesBuffer[0] = count === 0 ? 0 : 1;    // frames count on this level
+
+        framesBuffer[1] = 0;    // methodId
+        framesBuffer[2] = 0;    // x
+        framesBuffer[3] = count;
+        framesBuffer[4] = theOnlyChunksBufferPos;
+        framesBuffer[5] = singleSamplesCount;    // direct samples count
+
+        let framesBufferPos = 6;
+
+        for (let storagePosIndex = 0; storagePosIndex < theOnlyChunksBufferPos; storagePosIndex++) {
+            const storagePos = theOnlyChunksBuffer[storagePosIndex];
+            framesBuffer[framesBufferPos++] = storagePos;
+            framesBuffer[framesBufferPos++] = theOnlyChunks[storagePos];
+        }
+
+        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            if (filterOut(sampleIndex)) {
+                continue;
+            }
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos !== chunkEndPos - 1) {
+                sampleToChunkPos[sampleIndex] = chunkEndPos - 1;
+                sampleToStorageDelta[sampleIndex] = 0;
+
+                framesBuffer[framesBufferPos++] = sampleIndex;
+            }
+        }
+
+        return [framesBuffer, sampleToChunkPos, sampleToStorageDelta];
+    }
+
+    function prepareFramesDiff(from, to, baseFrom, baseTo) {
+        const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
+        const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
+        const storageSizes = currentHeatmap.blocksData.storageSizes;
+        const counts = currentHeatmap.blocksData.counts;
+
+        const countBeforeFirstBlock = getCount(counts, from - 1);
+        const countAtLastBlock = getCount(counts, to);
+
+        const baseCountBeforeFirstBlock = getCount(counts, baseFrom - 1);
+        const baseCountAtLastBlock = getCount(counts, baseTo);
+
+        const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
+        const sampleToChunkPos = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
+        const sampleToStorageDelta = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
+        const theOnlyChunks = new Uint32Array(storageSizes.length);   // fixme prealloc it!
+        const baseTheOnlyChunks = new Uint32Array(storageSizes.length);   // fixme prealloc it!
+
+        let theOnlyChunksBufferPos = 0;
+        let singleSamplesCount = 0;
+        let count = 0;
+        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            if (filterOut(sampleIndex)) {
+                continue;
+            }
+            count++;
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos + 1 === chunkEndPos) {
+                const storagePos = chunksToStorage[chunkPos];
+                if (theOnlyChunks[storagePos]++ === 0) {
+                    theOnlyChunksBuffer[theOnlyChunksBufferPos++] = storagePos;
+                }
+            } else {
+                singleSamplesCount++;
+            }
+        }
+
+        const theOnlyChunksCount = theOnlyChunksBufferPos;
+        let baseSingleSamplesCount = 0;
+        let baseCount = 0;
+        for (let sampleIndex = baseCountBeforeFirstBlock; sampleIndex < baseCountAtLastBlock; sampleIndex++) {
+            if (filterOut(sampleIndex)) {
+                continue;
+            }
+            baseCount++;
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos + 1 === chunkEndPos) {
+                const storagePos = chunksToStorage[chunkPos];
+                if (baseTheOnlyChunks[storagePos]++ === 0) {
+                    theOnlyChunksBuffer[theOnlyChunksBufferPos++] = storagePos;
+                }
+            } else {
+                baseSingleSamplesCount++;
+            }
+        }
+
+        // fixme prealloc it with max possible size!
+        const framesBuffer = new Uint32Array(10005000);
+        framesBuffer[0] = 1;    // frames count on this level
+
+        framesBuffer[1] = 0;    // methodId
+        framesBuffer[2] = 0;    // x
+        framesBuffer[3] = count;
+        framesBuffer[4] = theOnlyChunksCount;
+        framesBuffer[5] = singleSamplesCount;
+        framesBuffer[6] = baseCount;
+        framesBuffer[7] = theOnlyChunksBufferPos - theOnlyChunksCount;
+        framesBuffer[8] = baseSingleSamplesCount;
+
+        let framesBufferPos = 9;
+
+        for (let storagePosIndex = 0; storagePosIndex < theOnlyChunksCount; storagePosIndex++) {
+            const storagePos = theOnlyChunksBuffer[storagePosIndex];
+            framesBuffer[framesBufferPos++] = storagePos;
+            framesBuffer[framesBufferPos++] = theOnlyChunks[storagePos];
+        }
+
+        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
+            if (filterOut(sampleIndex)) {
+                continue;
+            }
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos + 1 !== chunkEndPos) {
+                sampleToChunkPos[sampleIndex] = chunkPos;
+
+                const storagePos = chunksToStorage[chunkPos];
+                sampleToStorageDelta[sampleIndex] = storageSizes[storagePos] | 0x80000000;
+
+                framesBuffer[framesBufferPos++] = sampleIndex;
+            }
+        }
+
+        for (let storagePosIndex = theOnlyChunksCount; storagePosIndex < theOnlyChunksBufferPos; storagePosIndex++) {
+            const storagePos = theOnlyChunksBuffer[storagePosIndex];
+            framesBuffer[framesBufferPos++] = storagePos;
+            framesBuffer[framesBufferPos++] = baseTheOnlyChunks[storagePos];
+        }
+
+        for (let sampleIndex = baseCountBeforeFirstBlock; sampleIndex < baseCountAtLastBlock; sampleIndex++) {
+            if (filterOut(sampleIndex)) {
+                continue;
+            }
+            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
+            const chunkEndPos = sampleToChunkEnds[sampleIndex];
+            if (chunkPos + 1 !== chunkEndPos) {
+                if (sampleToStorageDelta[sampleIndex] === 0) {
+                    sampleToChunkPos[sampleIndex] = chunkPos;
+
+                    const storagePos = chunksToStorage[chunkPos];
+                    sampleToStorageDelta[sampleIndex] = storageSizes[storagePos];
+                }
+                framesBuffer[framesBufferPos++] = sampleIndex;
+            }
+        }
+
+        return [framesBuffer, sampleToChunkPos, sampleToStorageDelta];
+    }
+
+    function filterOut(sample) {
+        if (!filterFrames) {
+            return false;
+        }
+        const sampleMarks = currentHeatmap.blocksData.sampleMarks;
+        return (sampleMarks[sample >> 5] & (1 << (sample & 31))) === 0;
     }
 
     function nextFrames(ctx) {
@@ -2254,13 +2587,23 @@
                 for (let child = longSamplesBufferPos + count - 1; child >= longSamplesBufferPos; child--) {
                     const sampleIndex = longSamplesBuffer[child];
 
-                    const chunkPos = (sampleToChunkEnds[sampleIndex - 1] || 0) + 1;
-
-                    sampleToChunkPos[sampleIndex] = chunkPos;
+                    let chunkPos = (sampleToChunkEnds[sampleIndex - 1] || 0) + 1;
                     const storagePos = chunksToStorage[chunkPos];
-                    sampleToStorageDelta[sampleIndex] = storageSizes[storagePos] + levelPlusOne;
+                    const storageSize = storageSizes[storagePos];
+                    sampleToChunkPos[sampleIndex] = chunkPos;
+                    sampleToStorageDelta[sampleIndex] = storageSize + levelPlusOne;
+                    let storageDelta = sampleToStorageDelta[sampleIndex] - levelPlusOne;
+                    if (storageDelta === 1) {
+                        const chunkEnd = sampleToChunkEnds[sampleIndex] || chunksToStorage.length;
+                        if (++chunkPos !== chunkEnd) {
+                            sampleToChunkPos[sampleIndex] = chunkPos;
+                            const storagePos = chunksToStorage[chunkPos];
+                            storageDelta = storageSizes[storagePos];
+                            sampleToStorageDelta[sampleIndex] = storageDelta + levelPlusOne;
+                        }
+                    }
 
-                    const methodId = storage[storagePos + storageSizes[storagePos] - 1];
+                    const methodId = storage[storagePos + storageSize - 1];
 
                     nextFrames[methodsBufferDirectSamples[methodId]++] = sampleIndex;
                 }
@@ -2353,7 +2696,7 @@
 
             if (storageDelta + 1 === storageSize) {
                 const chunkStart = sampleToChunkEnds[sampleIndex - 1] || 0;
-                if (--chunkPos !== chunkStart) {
+                if (--chunkPos >= chunkStart) {
                     sampleToChunkPos[sampleIndex] = chunkPos;
                     sampleToStorageDelta[sampleIndex] = levelPlusOne;
                 }
@@ -2534,120 +2877,12 @@
         ctx.nextFramesPointer = np;
     }
 
-    function prepareFramesDiff(from, to, baseFrom, baseTo) {
-        const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
-        const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
-        const storageSizes = currentHeatmap.blocksData.storageSizes;
-        const counts = currentHeatmap.blocksData.counts;
-
-        const countBeforeFirstBlock = getCount(counts, from - 1);
-        const countAtLastBlock = getCount(counts, to);
-        const count = countAtLastBlock - countBeforeFirstBlock;
-
-        const baseCountBeforeFirstBlock = getCount(counts, baseFrom - 1);
-        const baseCountAtLastBlock = getCount(counts, baseTo);
-        const baseCount = baseCountAtLastBlock - baseCountBeforeFirstBlock;
-
-        const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
-        const sampleToChunkPos = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
-        const sampleToStorageDelta = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
-        const theOnlyChunks = new Uint32Array(storageSizes.length);   // fixme prealloc it!
-        const baseTheOnlyChunks = new Uint32Array(storageSizes.length);   // fixme prealloc it!
-
-        let theOnlyChunksBufferPos = 0;
-        let singleSamplesCount = 0;
-        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
-            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
-            const chunkEndPos = sampleToChunkEnds[sampleIndex];
-            if (chunkPos + 1 === chunkEndPos) {
-                const storagePos = chunksToStorage[chunkPos];
-                if (theOnlyChunks[storagePos]++ === 0) {
-                    theOnlyChunksBuffer[theOnlyChunksBufferPos++] = storagePos;
-                }
-            } else {
-                singleSamplesCount++;
-            }
-        }
-
-        const theOnlyChunksCount = theOnlyChunksBufferPos;
-        let baseSingleSamplesCount = 0;
-        for (let sampleIndex = baseCountBeforeFirstBlock; sampleIndex < baseCountAtLastBlock; sampleIndex++) {
-            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
-            const chunkEndPos = sampleToChunkEnds[sampleIndex];
-            if (chunkPos + 1 === chunkEndPos) {
-                const storagePos = chunksToStorage[chunkPos];
-                if (baseTheOnlyChunks[storagePos]++ === 0) {
-                    theOnlyChunksBuffer[theOnlyChunksBufferPos++] = storagePos;
-                }
-            } else {
-                baseSingleSamplesCount++;
-            }
-        }
-
-        // fixme prealloc it with max possible size!
-        const framesBuffer = new Uint32Array(10005000);
-        framesBuffer[0] = 1;    // frames count on this level
-
-        framesBuffer[1] = 0;    // methodId
-        framesBuffer[2] = 0;    // x
-        framesBuffer[3] = count;
-        framesBuffer[4] = theOnlyChunksCount;
-        framesBuffer[5] = singleSamplesCount;
-        framesBuffer[6] = baseCount;
-        framesBuffer[7] = theOnlyChunksBufferPos - theOnlyChunksCount;
-        framesBuffer[8] = baseSingleSamplesCount;
-
-        let framesBufferPos = 9;
-
-        for (let storagePosIndex = 0; storagePosIndex < theOnlyChunksCount; storagePosIndex++) {
-            const storagePos = theOnlyChunksBuffer[storagePosIndex];
-            framesBuffer[framesBufferPos++] = storagePos;
-            framesBuffer[framesBufferPos++] = theOnlyChunks[storagePos];
-        }
-
-        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
-            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
-            const chunkEndPos = sampleToChunkEnds[sampleIndex];
-            if (chunkPos + 1 !== chunkEndPos) {
-                sampleToChunkPos[sampleIndex] = chunkPos;
-
-                const storagePos = chunksToStorage[chunkPos];
-                sampleToStorageDelta[sampleIndex] = storageSizes[storagePos] | 0x80000000;
-
-                framesBuffer[framesBufferPos++] = sampleIndex;
-            }
-        }
-
-        for (let storagePosIndex = theOnlyChunksCount; storagePosIndex < theOnlyChunksBufferPos; storagePosIndex++) {
-            const storagePos = theOnlyChunksBuffer[storagePosIndex];
-            framesBuffer[framesBufferPos++] = storagePos;
-            framesBuffer[framesBufferPos++] = baseTheOnlyChunks[storagePos];
-        }
-
-        for (let sampleIndex = baseCountBeforeFirstBlock; sampleIndex < baseCountAtLastBlock; sampleIndex++) {
-            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
-            const chunkEndPos = sampleToChunkEnds[sampleIndex];
-            if (chunkPos + 1 !== chunkEndPos) {
-                if (sampleToStorageDelta[sampleIndex] === 0) {
-                    sampleToChunkPos[sampleIndex] = chunkPos;
-
-                    const storagePos = chunksToStorage[chunkPos];
-                    sampleToStorageDelta[sampleIndex] = storageSizes[storagePos];
-                }
-                framesBuffer[framesBufferPos++] = sampleIndex;
-            }
-        }
-
-        return [framesBuffer, sampleToChunkPos, sampleToStorageDelta];
-    }
-
     function nextFramesDiff(ctx) {
         const frames = ctx.frames;
         const nextFrames = ctx.nextFrames;
 
         ctx.startX = 0;
         ctx.theOnlyChunksCount = 0;
-        ctx.longSamplesChunksCount = 0;
         ctx.directSamplesCount = 0;
 
         ctx.nextFramesPointer = 1; // one reserved to place nextFramesCount
@@ -2747,68 +2982,6 @@
         const methodCount = ctx.nextFrames.length - ctx.methodsMapFirstPos;
         ctx.nextFramesCount += methodCount;
         ctx.framesPointer = endFramesPointer;
-    }
-
-    function prepareFramesReversed(from, to) {
-        const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
-        const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
-        const storageSizes = currentHeatmap.blocksData.storageSizes;
-        const counts = currentHeatmap.blocksData.counts;
-
-        const countBeforeFirstBlock = getCount(counts, from - 1);
-        const countAtLastBlock = getCount(counts, to);
-        const count = countAtLastBlock - countBeforeFirstBlock;
-
-        const theOnlyChunksBuffer = new Uint32Array(100 * 1024 * 1024);   // fixme prealloc it!
-        const sampleToChunkPos = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
-        const sampleToStorageDelta = new Uint32Array(sampleToChunkEnds.length);   // fixme prealloc it!
-        const theOnlyChunks = new Uint32Array(storageSizes.length);   // fixme prealloc it!
-
-        let theOnlyChunksBufferPos = 0;
-        let singleSamplesCount = 0;
-        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
-            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
-            const chunkEndPos = sampleToChunkEnds[sampleIndex];
-            if (chunkPos === chunkEndPos - 1) {
-                const storagePos = chunksToStorage[chunkPos];
-                if (theOnlyChunks[storagePos]++ === 0) {
-                    theOnlyChunksBuffer[theOnlyChunksBufferPos++] = storagePos;
-                }
-            } else {
-                singleSamplesCount++;
-            }
-        }
-
-        // fixme prealloc it with max possible size!
-        const framesBuffer = new Uint32Array(10005000);
-        framesBuffer[0] = count === 0 ? 0 : 1;    // frames count on this level
-
-        framesBuffer[1] = 0;    // methodId
-        framesBuffer[2] = 0;    // x
-        framesBuffer[3] = count;
-        framesBuffer[4] = theOnlyChunksBufferPos;
-        framesBuffer[5] = singleSamplesCount;    // direct samples count
-
-        let framesBufferPos = 6;
-
-        for (let storagePosIndex = 0; storagePosIndex < theOnlyChunksBufferPos; storagePosIndex++) {
-            const storagePos = theOnlyChunksBuffer[storagePosIndex];
-            framesBuffer[framesBufferPos++] = storagePos;
-            framesBuffer[framesBufferPos++] = theOnlyChunks[storagePos];
-        }
-
-        for (let sampleIndex = countBeforeFirstBlock; sampleIndex < countAtLastBlock; sampleIndex++) {
-            const chunkPos = sampleToChunkEnds[sampleIndex - 1] || 0;
-            const chunkEndPos = sampleToChunkEnds[sampleIndex];
-            if (chunkPos !== chunkEndPos - 1) {
-                sampleToChunkPos[sampleIndex] = chunkEndPos - 1;
-                sampleToStorageDelta[sampleIndex] = 0;
-
-                framesBuffer[framesBufferPos++] = sampleIndex;
-            }
-        }
-
-        return [framesBuffer, sampleToChunkPos, sampleToStorageDelta];
     }
 
     function nextFramesReversed(ctx) {
@@ -3033,22 +3206,27 @@
         redrawHeatMap();
     }
 
-    function searchIterative(r) {
-        if (r && (r = prompt('Enter regexp to search:', '')) === null) {
+    function search(r, filter) {
+        filter = filter || false;
+        if (r && (r = prompt('Enter regexp to ' + (filter ? 'filter' : 'search') + ':', '')) === null) {
             return;
         }
+        const wasFilter = filterFrames;
+        filterFrames = filter;
         if (!r) {
             showFound = false;
             pattern = undefined;
             redrawHeatMap();
-            searchOnFlame();
+            if (wasFilter === filterFrames) {
+                searchOnFlame();
+            } else {
+                reselect();
+            }
             return;
         }
 
         const regex = RegExp(r)
-        pattern = function(method) {
-            return regex.test(methods.n[method]);
-        }
+        pattern = method => regex.test(methods.n[method]);
         showFound = true;
         const matchedMethods = new Set();
         for (let index = methods.c.length - 1; index >= 0; index--) {
@@ -3074,8 +3252,12 @@
             }
         }
 
-        searchForMarks(marks);
-        searchOnFlame();
+        searchForMarks();
+        if (filterFrames || wasFilter) {
+            reselect();
+        } else {
+            searchOnFlame();
+        }
     }
 
     function searchForMethod(methodId) {
@@ -3100,7 +3282,7 @@
             }
         }
 
-        searchForMarks(marks);
+        searchForMarks();
         searchOnFlame();
     }
 
@@ -3120,47 +3302,44 @@
         }
     }
 
-    function searchForMarks(marks) {
+    function searchForMarks() {
         const found = currentHeatmap.blocksData.foundCounts;
         const maxCounts = currentHeatmap.blocksData.searchMaxCounts;
         const minCounts = currentHeatmap.blocksData.searchMinCounts;
 
-        searchForMarksStep(marks);
+        searchForMarksStep();
         calculateMinMax(found, minCounts, maxCounts);
         redrawHeatMap();
     }
 
-    function searchForMarksStep(marks) {
+    function searchForMarksStep() {
         const counts = currentHeatmap.blocksData.counts;
         const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
         const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
         const found = currentHeatmap.blocksData.foundCounts;
+        const marks = currentHeatmap.blocksData.marks;
+        const sampleMarks = currentHeatmap.blocksData.sampleMarks;
 
-        let p = 0;
-        let count = 0;
-        let c = 0;
-        let prevCounts = 0;
-        let cc = counts[c];
-
-        for (let s = 0; s < sampleToChunkEnds.length; s++) {
-            const se = sampleToChunkEnds[s];
-            while (cc === 0) {
-                found[c++] = count;
-                const ccc = counts[c];
-                cc = ccc - prevCounts;
-                prevCounts = ccc;
-            }
-            cc--;
-            for (; p < se; p++) {
-                const storagePos = chunksToStorage[p];
-                if ((marks[storagePos >> 5] & (1 << (storagePos & 31))) !== 0) {
-                    count++;
-                    p = se;
-                    break;
+        sampleMarks.fill(0);
+        let sample = 0;
+        let chunk = 0;
+        let foundCount = 0;
+        for (let block = 0; block < counts.length; block++) {
+            const count = counts[block];
+            for (; sample < count; sample++) {
+                const chunkEnd = sampleToChunkEnds[sample];
+                for (; chunk < chunkEnd; chunk++) {
+                    const storagePos = chunksToStorage[chunk];
+                    if ((marks[storagePos >> 5] & (1 << (storagePos & 31))) !== 0) {
+                        sampleMarks[sample >> 5] |= 1 << (sample & 31);
+                        foundCount++;
+                        chunk = chunkEnd;
+                        break;
+                    }
                 }
             }
+            found[block] = foundCount;
         }
-        found[found.length - 1] = count;
     }
 
     function calculateMinMax(counts, minCounts, maxCounts) {
@@ -3355,7 +3534,7 @@
             heatDiffEnd = highlightEnd;
 
             callHighlightRedraw(highlightStart, highlightEnd, 'Diff');
-            renderDiff(
+            renderWrapperDiff(
                 (minSelected - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
                 (maxSelected - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1,
                 (heatDiffStart - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,

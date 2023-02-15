@@ -15,10 +15,10 @@ public class LzNodeTree {
     private long[] outputData;              // TODO can be reused after writeTree:130!
     // nodeId -> childrenCount
     private int[] childrenCount;    // reused by SynonymTable
-    // nodeId -> lengthToRoot << 32 | NOT_VISITED_MARKER | parentNodeId
-    private int[] lengthToRoot;
+    // nodeId -> parentNodeId << 32 | lengthToRoot
+    private long[] lengthToRoot;
 
-    private int storageSize = 1;
+    private int storageSize = 0;
     private int nodesCount = 1;
 
     public LzNodeTree() {
@@ -27,7 +27,7 @@ public class LzNodeTree {
 
         outputData = new long[INITIAL_CAPACITY / 2];
         childrenCount = new int[INITIAL_CAPACITY / 2];
-        lengthToRoot = new int[INITIAL_CAPACITY / 2];
+        lengthToRoot = new long[INITIAL_CAPACITY / 2];
     }
 
     public int appendChild(int parentNode, int methodId) {
@@ -50,10 +50,10 @@ public class LzNodeTree {
         if (nodesCount >= outputData.length) {
             outputData = Arrays.copyOf(outputData, nodesCount + nodesCount / 2);
             childrenCount = Arrays.copyOf(childrenCount, nodesCount + nodesCount / 2);
-            lengthToRoot =  Arrays.copyOf(lengthToRoot, nodesCount + nodesCount / 2);
+            lengthToRoot = Arrays.copyOf(lengthToRoot, nodesCount + nodesCount / 2);
         }
 
-        lengthToRoot[nodesCount] = lengthToRoot[parentNode] + 1;
+        lengthToRoot[nodesCount] = ((int) lengthToRoot[parentNode] + 1) | ((long) parentNode << 32);
         outputData[nodesCount - 1] = key;
         keys[i] = key;
         values[i] = nodesCount;
@@ -84,23 +84,55 @@ public class LzNodeTree {
         return (int) (treeElement >>> 32);
     }
 
+    public void markNodeAsLastlyUsed(int nodeId) {
+        long ltr = lengthToRoot[nodeId];
+        int parent = (int) (ltr >>> 32);
+        if (parent >= 0) {
+            lengthToRoot[nodeId] = ltr | 0x8000000000000000L;
+            do {
+                ltr = lengthToRoot[parent];
+                lengthToRoot[parent] = ltr | 0xC000000000000000L;
+                parent = (int) (ltr >>> 32);
+            } while (parent > 0);
+        }
+    }
+
+    // destroys values
+    public void compactTree(int[] remapAsWell, int fromIndex, int toIndex) {
+        int[] mappings = values;
+        mappings[0] = 0;
+        int nodes = 1;
+        int storageSize = 0;
+        for (int oldNodeID = 1; oldNodeID < nodesCount; oldNodeID++) {
+            long ltr = lengthToRoot[oldNodeID];
+            if (ltr >= 0) {
+                // unused
+                continue;
+            }
+            if ((ltr & 0x4000000000000000L) == 0) {
+                storageSize += (int) ltr;
+            }
+            mappings[oldNodeID] = nodes;
+            childrenCount[nodes] = childrenCount[oldNodeID];
+            long out = outputData[oldNodeID - 1];
+            long outMethod = 0xFFFFFFFF00000000L & out;
+            int oldParent = (int) out;
+            outputData[nodes - 1] = outMethod | mappings[oldParent];
+            nodes++;
+        }
+        for (int i = fromIndex; i < toIndex; i++) {
+            remapAsWell[i] = mappings[remapAsWell[i]];
+        }
+        this.storageSize = storageSize;
+        this.nodesCount = nodes;
+    }
+
     // destroys keys and childrenCount arrays
     public SynonymTable extractSynonymTable() {
-        for (int i = 0; i < nodesCount; i++) {
-            if (childrenCount[i] != 0) {
-                lengthToRoot[i] = 0;
-            }
-        }
         return new SynonymTable(keys, childrenCount, nodesCount);
     }
 
-    public void markUsed(int nodeId) {
-        storageSize += lengthToRoot[nodeId];
-        lengthToRoot[nodeId] = 0;
-    }
-
     public int storageSize() {
-        System.out.println("storageSize: " + storageSize);
         return storageSize;
     }
 

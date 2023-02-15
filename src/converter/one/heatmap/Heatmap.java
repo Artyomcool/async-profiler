@@ -140,6 +140,7 @@ public class Heatmap extends ResourceProcessor {
         // writes sample chunks as var-ints references for [node id]
         writeSamples(out, synonymTable, context, stackChunksBuffer);
         debugStep("samples body", out, wasPos, veryStart);
+        debug("storage size: " + context.nodeTree.storageSize());
 
         out.write30(context.nodeTree.nodesCount());
         out.write30(context.sampleList.blockSizes.length);
@@ -157,7 +158,6 @@ public class Heatmap extends ResourceProcessor {
 
             for (int i = chunksStart; i < chunksEnd; i++) {
                 int nodeId = stackChunksBuffer[i];
-                context.nodeTree.markUsed(nodeId);
                 out.writeVar(synonymTable.nodeIdOrSynonym(nodeId));
             }
         }
@@ -263,7 +263,10 @@ public class Heatmap extends ResourceProcessor {
                         if (stackBuffer.length == chunksIterator) {
                             stackBuffer = Arrays.copyOf(stackBuffer, chunksIterator + chunksIterator / 2);
                         }
-                        stackBuffer[chunksIterator++] = context.nodeTree.nodesCount() - 1;  // TODO encapsulate
+
+                        int justAppendedId = context.nodeTree.nodesCount() - 1;
+                        stackBuffer[chunksIterator++] = justAppendedId;  // TODO encapsulate
+                        context.nodeTree.markNodeAsLastlyUsed(justAppendedId);
                     }
                 }
 
@@ -271,7 +274,9 @@ public class Heatmap extends ResourceProcessor {
                     if (stackBuffer.length == chunksIterator) {
                         stackBuffer = Arrays.copyOf(stackBuffer, chunksIterator + chunksIterator / 2);
                     }
+
                     stackBuffer[chunksIterator++] = current;
+                    context.nodeTree.markNodeAsLastlyUsed(current);
                 }
 
                 stackBuffer[stackId * 2 + 1] = chunksIterator;  // end
@@ -284,6 +289,9 @@ public class Heatmap extends ResourceProcessor {
                 }
             }
         }
+
+        // removes unused chunks
+        context.nodeTree.compactTree(stackBuffer, context.stackTraces.length * 2 + 1, chunksIterator);
 
         return stackBuffer;
     }
@@ -320,7 +328,7 @@ public class Heatmap extends ResourceProcessor {
                 }
             }
         }
-        if (encoder.flush()) {
+        if (encoder.flushIfNeed()) {
             for (int value : encoder.values) {
                 out.nextByte(value);
             }
@@ -387,6 +395,8 @@ public class Heatmap extends ResourceProcessor {
 
     private static class State {
 
+        private static final int LIMIT = Integer.MAX_VALUE;
+
         final SampleList sampleList;
         final StackStorage stackTracesRemap = new StackStorage();
 
@@ -401,6 +411,9 @@ public class Heatmap extends ResourceProcessor {
         }
 
         public void addEvent(int stackTraceId, int extra, byte type, long timeMs) {
+            if (sampleList.getRecordsCount() >= LIMIT) {
+                return;
+            }
             if (extra == 0) {
                 sampleList.add(stackTracesCache.get(stackTraceId), timeMs);
                 return;

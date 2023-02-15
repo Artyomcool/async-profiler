@@ -49,7 +49,7 @@ public class HuffmanEncoder {
         this.decodeTable = decodeTable;
 
         encodeTable = new long[maxFrequencyIndex + 1];
-        encodeTable[(int)decodeTable[0]] = decodeTable[0] & 0xFF00_0000_0000_0000L;
+        encodeTable[(int) decodeTable[0]] = decodeTable[0] & 0xFF00_0000_0000_0000L;
         long code = 0;
 
         for (int i = 1; i < decodeTable.length; i++) {
@@ -61,18 +61,17 @@ public class HuffmanEncoder {
 
             code = (code + 1) << (nowCount - prevCount);
 
-            int value = (int)decodeNow;
+            int value = (int) decodeNow;
             encodeTable[value] = nowCount << 56 | code;
         }
     }
 
-    int i = 0;
     public boolean append(int value) {
         boolean hasOverflow = false;
 
         long v = encodeTable[value];
         int bits = (int) (v >>> 56);
-        for (long i = 1L << (bits-1); i > 0; i>>>=1) {
+        for (long i = 1L << (bits - 1); i > 0; i >>>= 1) {
             this.data = this.data << 1 | ((v & i) == 0 ? 0 : 1);
             if (++this.bits == MAX_BITS) {
                 hasOverflow = true;
@@ -83,11 +82,16 @@ public class HuffmanEncoder {
         return hasOverflow;
     }
 
-    public boolean flush() {
+    public boolean flushIfNeed() {
         if (bits == 0) {
             return false;
         }
+        this.data = this.data << (MAX_BITS - bits);
+        flush();
+        return true;
+    }
 
+    public void flush() {
         data = Integer.reverse(data) >>> 5;
 
         values[3] = data % 123;
@@ -100,7 +104,6 @@ public class HuffmanEncoder {
         data = 0;
 
         bits = 0;
-        return true;
     }
 
     public long[] calculateOutputTable() {
@@ -111,7 +114,7 @@ public class HuffmanEncoder {
         final int frequency;
         final int value;
 
-        Node left,right;
+        Node left, right;
 
         Node(int frequency, int value) {
             this.frequency = frequency;
