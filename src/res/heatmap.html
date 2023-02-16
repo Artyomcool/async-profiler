@@ -145,7 +145,7 @@
             background: linear-gradient(var(--c1), var(--c2))
         }
         .status {
-            position:fixed;
+            position: fixed;
             bottom: 0;
             padding: 2px 4px;
             background-color: #ffffe0;
@@ -247,6 +247,7 @@
     let dRs, dGs, dBs;
     let dRdg, dGdg, dBdg;
     let dRdl, dGdl, dBdl;
+
     function setH(H) {
         const dX = Math.round(256 - Math.abs(H % 2 - 1) * 256);
         switch (H | 0) {
@@ -270,6 +271,7 @@
                 break;
         }
     }
+
     setH(0.4);
 
     dRdg = dR;
@@ -343,7 +345,7 @@
     }
 
     document.getElementById('flame-diff-reverse').onclick = () => {
-        if (heatDiffStart !== -1) {
+        if (heatDiffSample1 !== -1) {
             renderWrapperDiff(lastBaseRenderFrom, lastBaseRenderTo, lastRenderFrom, lastRenderTo);
         }
     };
@@ -706,10 +708,10 @@
 
         nextInt30() {
             return this.byteAt(this.pos++) << 0
-                |  this.byteAt(this.pos++) << 6
-                |  this.byteAt(this.pos++) << 12
-                |  this.byteAt(this.pos++) << 18
-                |  this.byteAt(this.pos++) << 24;
+                | this.byteAt(this.pos++) << 6
+                | this.byteAt(this.pos++) << 12
+                | this.byteAt(this.pos++) << 18
+                | this.byteAt(this.pos++) << 24;
         }
 
         byteAt(pos) {
@@ -739,10 +741,10 @@
                 p += this.data.length;
             }
             return this.byteAt(p++) << 0
-                |  this.byteAt(p++) << 6
-                |  this.byteAt(p++) << 12
-                |  this.byteAt(p++) << 18
-                |  this.byteAt(p++) << 24;
+                | this.byteAt(p++) << 6
+                | this.byteAt(p++) << 12
+                | this.byteAt(p++) << 18
+                | this.byteAt(p++) << 24;
         }
 
     }
@@ -777,12 +779,12 @@
         const storageSizes = new Uint32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 4 * storageSize, storageSize);   // FIXME NOTE!!! methods in most cases takes only 2 bytes!
         const counts = new Int32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 8 * storageSize, blocksCount);
         const foundCounts = new Int32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 8 * storageSize + 4 * blocksCount, blocksCount);
-        const maxCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount, zoomToGroupSize.length);
-        const searchMaxCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 4 * zoomToGroupSize.length, zoomToGroupSize.length);
-        const minCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 8 * zoomToGroupSize.length, zoomToGroupSize.length);
-        const searchMinCounts = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 12 * zoomToGroupSize.length, zoomToGroupSize.length);
-        const marks = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 16 * zoomToGroupSize.length, storageMarksIntsCount);
-        const sampleMarks = new Uint32Array(returnBuffer,  4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 16 * zoomToGroupSize.length + 4 * storageMarksIntsCount, sampleMarksIntsCount);
+        const maxCounts = new Uint32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount, zoomToGroupSize.length);
+        const searchMaxCounts = new Uint32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 4 * zoomToGroupSize.length, zoomToGroupSize.length);
+        const minCounts = new Uint32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 8 * zoomToGroupSize.length, zoomToGroupSize.length);
+        const searchMinCounts = new Uint32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 12 * zoomToGroupSize.length, zoomToGroupSize.length);
+        const marks = new Uint32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 16 * zoomToGroupSize.length, storageMarksIntsCount);
+        const sampleMarks = new Uint32Array(returnBuffer, 4 * samplesCount + 4 * chunksCount + 8 * storageSize + 8 * blocksCount + 16 * zoomToGroupSize.length + 4 * storageMarksIntsCount, sampleMarksIntsCount);
 
         const huffmanTableSize = data.nextVarInt();
         const huffmanMaxBits = data.nextVarInt();
@@ -873,7 +875,7 @@
             if (flags & 2) {    // leaf
                 const storagePos = lz78Refs[rid];
                 if (storagePos === 0) {
-                    let recordId  = rid;
+                    let recordId = rid;
                     let size = lz78Sizes[recordId];
                     do {
                         storageSizes[pos] = size--;
@@ -1074,8 +1076,8 @@
     let heatLastSample = -1;
     let heatActiveSample1 = -1;
     let heatActiveSample2 = -1;
-    let heatDiffStart = -1;
-    let heatDiffEnd = -1;
+    let heatDiffSample1 = -1;
+    let heatDiffSample2 = -1;
     let highlightStart = -1;
     let highlightEnd = -1;
 
@@ -1264,7 +1266,7 @@
     }
 
     function reselect() {
-        if (heatDiffStart === -1) {
+        if (heatDiffSample1 === -1) {
             renderFunc(lastRenderFrom, lastRenderTo);
         } else {
             renderFuncDiff(lastRenderFrom, lastRenderTo, lastBaseRenderFrom, lastBaseRenderTo);
@@ -1298,7 +1300,8 @@
     function renderTraces(from, to) {
         addTask('flame', function () {
             return false;
-        }, function () {});
+        }, function () {
+        });
         addTask('flamePrepare', () => {
             let [framesBuffer, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer] = prepareFrames(from, to);
             let nextFramesBuffer = new Uint32Array(100050000);    // FIXME
@@ -1444,7 +1447,8 @@
     function renderTracesReversed(from, to) {
         addTask('flame', function () {
             return false;
-        }, function () {});
+        }, function () {
+        });
         addTask('flamePrepare', () => {
             let [framesBuffer, sampleToChunkPos, sampleToStorageDelta, longSamplesBuffer] = prepareFramesReversed(from, to);
             let nextFramesBuffer = new Uint32Array(100050000);    // FIXME
@@ -1588,7 +1592,8 @@
     function renderSelfDominators(from, to) {
         addTask('flame', function () {
             return false;
-        }, function () {});
+        }, function () {
+        });
         addTask('flamePrepare', () => {
             const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
             const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
@@ -1621,7 +1626,13 @@
             levels.length = 0;
             for (let i = 0; i < methodsInBuffer; i++) {
                 const method = methodsBuffer[i];
-                levels.push([{left: 0, width: methodsCount[method], color: methods.c[method], title: methods.n[method], method: method}]);
+                levels.push([{
+                    left: 0,
+                    width: methodsCount[method],
+                    color: methods.c[method],
+                    title: methods.n[method],
+                    method: method
+                }]);
             }
             renderWithMatch(levels.length * 16, levels[0][0], 0);
             return false;
@@ -1633,7 +1644,8 @@
     function renderSelfDominatorsDiff(from, to, baseFrom, baseTo) {
         addTask('flame', function () {
             return false;
-        }, function () {});
+        }, function () {
+        });
         addTask('flamePrepare', () => {
             const chunksToStorage = currentHeatmap.blocksData.chunksToStorage;
             const sampleToChunkEnds = currentHeatmap.blocksData.sampleToChunkEnds;
@@ -1694,7 +1706,7 @@
                 const method = methodsBuffer[i];
                 const count = methodsCount[method];
                 const baseCount = baseMethodsCount[method];
-                const title = methods.n[method]  + " (" + count + "/" + baseCount + ")"
+                const title = methods.n[method] + " (" + count + "/" + baseCount + ")"
 
                 let color = diffColor(count, baseCount, minDiff, maxDiff);
                 levels.push([{left: 0, width: count, color: color, title: title, method: method}]);
@@ -2839,7 +2851,7 @@
 
         for (let child = 0; child < directSamplesCount; child++) {
             const sampleIndex = frames[fp++];
-            const storageDelta = level -  (sampleToStorageDelta[sampleIndex] & 0x7fffffff);
+            const storageDelta = level - (sampleToStorageDelta[sampleIndex] & 0x7fffffff);
 
             const chunkPos = sampleToChunkPos[sampleIndex];
             const storageStartPos = chunksToStorage[chunkPos];
@@ -3802,7 +3814,7 @@
 
     function searchForMethod(methodId) {
         showFound = true;
-        pattern = function(method) {
+        pattern = function (method) {
             return method === methodId;
         }
         const storage = currentHeatmap.blocksData.storage;
@@ -3951,7 +3963,7 @@
 
     document.getElementById('heatmap-height-line').onclick = function () {
         fillCanvasWithEvents((zoomToGroupSize.length + currentHeatmap.zoom - 1) % (zoomToGroupSize.length));
-        highlightStart = highlightEnd = heatDiffStart = heatDiffEnd = heatActiveSample1 = heatActiveSample2 = -1;
+        highlightStart = highlightEnd = heatDiffSample1 = heatDiffSample2 = heatActiveSample1 = heatActiveSample2 = -1;
         for (let suffix of ['Selection', 'Diff', 'Active']) {
             for (let prefix of ['left', 'leftMiddle', 'middle', 'rightMiddle', 'right']) {
                 document.getElementById(prefix + suffix).style.display = 'none';
@@ -4070,19 +4082,19 @@
             let minSelected = Math.min(heatActiveSample1, heatActiveSample2);
             let maxSelected = Math.max(heatActiveSample1, heatActiveSample2);
 
-            heatDiffStart = highlightStart;
-            heatDiffEnd = highlightEnd;
+            heatDiffSample1 = highlightStart;
+            heatDiffSample2 = highlightEnd;
 
             callHighlightRedraw(highlightStart, highlightEnd, 'Diff');
             renderWrapperDiff(
                 (minSelected - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
                 (maxSelected - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1,
-                (heatDiffStart - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
-                (heatDiffEnd - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1
+                (heatDiffSample1 - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
+                (heatDiffSample2 - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1
             );
         } else {
-            heatDiffStart = -1;
-            heatDiffEnd = -1;
+            heatDiffSample1 = -1;
+            heatDiffSample2 = -1;
             if (shiftPressed && heatActiveSample1 !== -1) {
                 heatActiveSample2 = sample;
             } else {
@@ -4101,7 +4113,59 @@
         }
     }
 
-    window.addEventListener('keydown', function (e) {
+    function updateSelectionArea(delta, endOnly, diff) {
+        highlightStart = -1;
+        highlightEnd = -1;
+        if (diff) {
+            if (heatDiffSample1 === -1) {
+                let minSelected = Math.min(heatActiveSample1, heatActiveSample2);
+                let maxSelected = Math.max(heatActiveSample1, heatActiveSample2);
+                heatDiffSample1 = minSelected + delta;
+                heatDiffSample2 = maxSelected + delta;
+            } else {
+                if (!endOnly) {
+                    heatDiffSample1 += delta;
+                }
+                heatDiffSample2 += delta;
+            }
+            let min = Math.min(heatDiffSample1, heatDiffSample2);
+            let max = Math.max(heatDiffSample1, heatDiffSample2);
+            callHighlightRedraw(min, max, 'Diff');
+        } else {
+            if (!endOnly) {
+                heatActiveSample1 += delta;
+            }
+            heatActiveSample2 += delta;
+            let minSelected = Math.min(heatActiveSample1, heatActiveSample2);
+            let maxSelected = Math.max(heatActiveSample1, heatActiveSample2);
+
+            callHighlightRedraw(minSelected, maxSelected, 'Active');
+            callHighlightRedraw(highlightStart, highlightEnd, 'Selection');
+            if (heatDiffSample1 === -1) {
+                callHighlightRedraw(minSelected, maxSelected, 'Diff');
+            }
+        }
+        let minSelected = Math.min(heatActiveSample1, heatActiveSample2);
+        let maxSelected = Math.max(heatActiveSample1, heatActiveSample2);
+
+        if (heatDiffSample1 === -1) {
+            renderWrapper(
+                (minSelected - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
+                (maxSelected - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1
+            );
+        } else {
+            let min = Math.min(heatDiffSample1, heatDiffSample2);
+            let max = Math.max(heatDiffSample1, heatDiffSample2);
+            renderWrapperDiff(
+                (minSelected - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
+                (maxSelected - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1,
+                (min - currentHeatmap.startBlock()) * currentHeatmap.timeSquareScale,
+                (max - currentHeatmap.startBlock() + 1) * currentHeatmap.timeSquareScale - 1
+            );
+        }
+    }
+
+    window.addEventListener('keydown', e => {
         if (e.key === 'Shift') {
             callSelectionRedraw(heatLastSample, true, e.ctrlKey);
         } else if (e.key === 'Control') {
@@ -4109,12 +4173,32 @@
         }
     });
 
-    window.addEventListener('keyup', function (e) {
+    window.addEventListener('keyup', e => {
         if (e.key === 'Shift') {
             callSelectionRedraw(heatLastSample, false, e.ctrlKey);
         } else if (e.key === 'Control') {
             callSelectionRedraw(heatLastSample, e.shiftKey, false);
         }
+    });
+
+    window.addEventListener('keydown', e => {
+        switch (e.key) {
+            case 'ArrowUp':
+                updateSelectionArea(-1, e.shiftKey, e.ctrlKey);
+                break;
+            case 'ArrowDown':
+                updateSelectionArea(+1, e.shiftKey, e.ctrlKey);
+                break;
+            case 'ArrowLeft':
+                updateSelectionArea(-currentHeatmap.timeSquareRowsCount, e.shiftKey, e.ctrlKey);
+                break;
+            case 'ArrowRight':
+                updateSelectionArea(+currentHeatmap.timeSquareRowsCount, e.shiftKey, e.ctrlKey);
+                break;
+            default:
+                return;
+        }
+        e.preventDefault();
     });
 
     let moved = false;
